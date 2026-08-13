@@ -3,12 +3,14 @@ package com.example.swtichandsavepda.di
 import com.example.swtichandsavepda.BuildConfig
 import com.example.swtichandsavepda.data.remote.PdaApiService
 import com.example.swtichandsavepda.data.remote.PdaJson
+import com.example.swtichandsavepda.data.remote.WriteAttemptEventListenerFactory
 import com.example.swtichandsavepda.data.remote.interceptor.AuthInterceptor
 import com.example.swtichandsavepda.data.remote.interceptor.TokenAuthenticator
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -36,22 +38,51 @@ object NetworkModule {
         val builder = OkHttpClient.Builder()
             .addInterceptor(authInterceptor)
             .authenticator(tokenAuthenticator)
+            .eventListenerFactory(WriteAttemptEventListenerFactory)
+            // The retry policy for a non-idempotent stock write belongs to the
+            // app, not to the HTTP client: OkHttp's default can re-send a POST
+            // over a fresh route when the portal may already have consumed the
+            // first one. Reads compensate for this in safeApiCall.
+            .retryOnConnectionFailure(false)
             .connectTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .writeTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
         if (BuildConfig.NETWORK_LOGGING) {
-            builder.addInterceptor(
-                HttpLoggingInterceptor().apply {
-                    level = HttpLoggingInterceptor.Level.BODY
-                    // Never let the bearer token reach logcat, even in debug.
-                    redactHeader("Authorization")
-                },
-            )
+            builder.addInterceptor(bodySafeLoggingInterceptor())
         }
 
         return builder.build()
     }
+
+    /**
+     * BODY-level logging everywhere except the endpoints whose **request body is
+     * a credential**.
+     *
+     * `redactHeader` cannot help there: the password sits in the JSON body, not
+     * in a header, so a plain BODY logger prints it to logcat in full. This is
+     * debug-only (`NETWORK_LOGGING` is false in release), but a debug build is
+     * exactly where screen shares, bug reports and CI logs come from.
+     */
+    private fun bodySafeLoggingInterceptor(): Interceptor {
+        val full = HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.BODY
+            redactHeader("Authorization")
+        }
+        val headersOnly = HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.HEADERS
+            redactHeader("Authorization")
+        }
+
+        return Interceptor { chain ->
+            val path = chain.request().url.encodedPath
+            val delegate = if (CREDENTIAL_PATHS.any { path.endsWith(it) }) headersOnly else full
+            delegate.intercept(chain)
+        }
+    }
+
+    /** Paths whose request body carries a secret. */
+    private val CREDENTIAL_PATHS = listOf("/api/pda/login")
 
     @Provides
     @Singleton

@@ -19,6 +19,7 @@ import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Tag
 
 /**
  * The PDA portal contract (`https://retail-portal.sspos.co.uk`). Every path is
@@ -72,30 +73,37 @@ interface PdaApiService {
     @POST("api/pda/purchase-orders")
     suspend fun createPurchaseOrder(
         @Body body: PurchaseOrderRequest,
+        @Tag attempt: WriteAttempt,
     ): DocumentEnvelope<PurchaseOrderDto>
 
     @PUT("api/pda/purchase-orders/{id}")
     suspend fun updatePurchaseOrder(
         @Path("id") id: Long,
         @Body body: PurchaseOrderRequest,
+        @Tag attempt: WriteAttempt,
     ): DocumentEnvelope<PurchaseOrderDto>
 
     @POST("api/pda/purchase-orders/{id}/receive")
     suspend fun receivePurchaseOrder(
         @Path("id") id: Long,
         @Body body: ReceivePurchaseOrderRequest,
+        @Tag attempt: WriteAttempt,
     ): DocumentEnvelope<PurchaseOrderDto>
 
     @GET("api/pda/purchase-orders")
     suspend fun listPurchaseOrders(): JsonElement
 
     @POST("api/pda/purchase-orders/{id}/cancel")
-    suspend fun cancelPurchaseOrder(@Path("id") id: Long): DocumentEnvelope<PurchaseOrderDto>
+    suspend fun cancelPurchaseOrder(
+        @Path("id") id: Long,
+        @Tag attempt: WriteAttempt,
+    ): DocumentEnvelope<PurchaseOrderDto>
 
     // ── Purchase returns ────────────────────────────────────────────────────
     @POST("api/pda/purchase-returns")
     suspend fun createPurchaseReturn(
         @Body body: PurchaseReturnRequest,
+        @Tag attempt: WriteAttempt,
     ): DocumentEnvelope<PurchaseReturnDto>
 
     @GET("api/pda/purchase-returns")
@@ -105,15 +113,20 @@ interface PdaApiService {
     suspend fun updatePurchaseReturn(
         @Path("id") id: Long,
         @Body body: PurchaseReturnRequest,
+        @Tag attempt: WriteAttempt,
     ): DocumentEnvelope<PurchaseReturnDto>
 
     @POST("api/pda/purchase-returns/{id}/cancel")
-    suspend fun cancelPurchaseReturn(@Path("id") id: Long): DocumentEnvelope<PurchaseReturnDto>
+    suspend fun cancelPurchaseReturn(
+        @Path("id") id: Long,
+        @Tag attempt: WriteAttempt,
+    ): DocumentEnvelope<PurchaseReturnDto>
 
     // ── Stock adjustments ───────────────────────────────────────────────────
     @POST("api/pda/stock-adjustments")
     suspend fun createStockAdjustment(
         @Body body: StockAdjustmentRequest,
+        @Tag attempt: WriteAttempt,
     ): DocumentEnvelope<StockAdjustmentDto>
 
     @GET("api/pda/stock-adjustments")
@@ -123,8 +136,12 @@ interface PdaApiService {
     suspend fun updateStockAdjustment(
         @Path("id") id: Long,
         @Body body: StockAdjustmentRequest,
+        @Tag attempt: WriteAttempt,
     ): DocumentEnvelope<StockAdjustmentDto>
 
     @POST("api/pda/stock-adjustments/{id}/cancel")
-    suspend fun cancelStockAdjustment(@Path("id") id: Long): DocumentEnvelope<StockAdjustmentDto>
+    suspend fun cancelStockAdjustment(
+        @Path("id") id: Long,
+        @Tag attempt: WriteAttempt,
+    ): DocumentEnvelope<StockAdjustmentDto>
 }

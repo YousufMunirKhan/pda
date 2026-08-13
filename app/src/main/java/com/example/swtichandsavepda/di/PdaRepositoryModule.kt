@@ -1,5 +1,7 @@
 package com.example.swtichandsavepda.di
 
+import com.example.swtichandsavepda.data.local.SubmissionJournal
+import com.example.swtichandsavepda.data.local.SubmissionJournalImpl
 import com.example.swtichandsavepda.data.repository.PdaAuthRepository
 import com.example.swtichandsavepda.data.repository.PdaAuthRepositoryImpl
 import com.example.swtichandsavepda.data.repository.PdaPurchaseOrderRepository
@@ -48,4 +50,8 @@ abstract class PdaRepositoryModule {
     abstract fun bindPdaReferenceRepository(
         impl: PdaReferenceRepositoryImpl,
     ): PdaReferenceRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindSubmissionJournal(impl: SubmissionJournalImpl): SubmissionJournal
 }

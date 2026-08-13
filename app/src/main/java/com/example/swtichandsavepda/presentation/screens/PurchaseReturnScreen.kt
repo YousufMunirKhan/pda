@@ -1,5 +1,6 @@
 package com.example.swtichandsavepda.presentation.screens.purchasereturn
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,13 +37,13 @@ import com.example.swtichandsavepda.data.model.ProductUnit
 import com.example.swtichandsavepda.data.model.PurchaseReturnDoc
 import com.example.swtichandsavepda.presentation.components.BrandCard
 import com.example.swtichandsavepda.presentation.components.BrandScaffold
-import com.example.swtichandsavepda.presentation.components.FeedbackBanner
 import com.example.swtichandsavepda.presentation.components.FormField
 import com.example.swtichandsavepda.presentation.components.PortalStateChip
 import com.example.swtichandsavepda.presentation.components.ReferenceOption
 import com.example.swtichandsavepda.presentation.components.ReferencePickerField
 import com.example.swtichandsavepda.presentation.components.SectionTitle
-import com.example.swtichandsavepda.presentation.components.UnitSelectorRow
+import com.example.swtichandsavepda.presentation.components.SubmitOutcomeBanner
+import com.example.swtichandsavepda.presentation.components.UnitSection
 import com.example.swtichandsavepda.ui.theme.StatusDanger
 import com.example.swtichandsavepda.ui.theme.brandColors
 
@@ -56,6 +57,7 @@ fun PurchaseReturnScreen(
     onSearchProducts: suspend (String) -> Result<List<ReferenceOption>>,
     onSelectLineProduct: (ReferenceOption) -> Unit,
     onSelectLineUnit: (ProductUnit) -> Unit,
+    onRetryLineUnits: () -> Unit,
     onLineQuantityChange: (String) -> Unit,
     onLineCostPriceChange: (String) -> Unit,
     onLineReasonChange: (String) -> Unit,
@@ -68,10 +70,15 @@ fun PurchaseReturnScreen(
     onDismissMessages: () -> Unit,
     onBackClick: () -> Unit,
 ) {
+    // A stock write that has left the device cannot be un-sent, and leaving the
+    // screen would cancel our view of it without cancelling the server's. Hold
+    // the operator here until the outcome is known - the 30s timeout bounds it.
+    BackHandler(enabled = uiState.isSubmitting) { /* deliberately swallowed */ }
+
     BrandScaffold(
         title = "Purchase Returns",
         subtitle = "Return goods to a supplier",
-        onBackClick = onBackClick,
+        onBackClick = onBackClick.takeIf { !uiState.isSubmitting },
         actions = {
             IconButton(onClick = onRefresh) {
                 Icon(
@@ -90,11 +97,8 @@ fun PurchaseReturnScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            uiState.successMessage?.let { message ->
-                FeedbackBanner(message = message, isError = false, onDismiss = onDismissMessages)
-            }
-            uiState.error?.let { message ->
-                FeedbackBanner(message = message, isError = true, onDismiss = onDismissMessages)
+            uiState.outcome?.let { outcome ->
+                SubmitOutcomeBanner(outcome = outcome, onDismiss = onDismissMessages)
             }
 
             CreateReturnCard(
@@ -106,6 +110,7 @@ fun PurchaseReturnScreen(
                 onSearchProducts = onSearchProducts,
                 onSelectLineProduct = onSelectLineProduct,
                 onSelectLineUnit = onSelectLineUnit,
+                onRetryLineUnits = onRetryLineUnits,
                 onLineQuantityChange = onLineQuantityChange,
                 onLineCostPriceChange = onLineCostPriceChange,
                 onLineReasonChange = onLineReasonChange,
@@ -156,6 +161,7 @@ private fun CreateReturnCard(
     onSearchProducts: suspend (String) -> Result<List<ReferenceOption>>,
     onSelectLineProduct: (ReferenceOption) -> Unit,
     onSelectLineUnit: (ProductUnit) -> Unit,
+    onRetryLineUnits: () -> Unit,
     onLineQuantityChange: (String) -> Unit,
     onLineCostPriceChange: (String) -> Unit,
     onLineReasonChange: (String) -> Unit,
@@ -207,9 +213,10 @@ private fun CreateReturnCard(
                 placeholder = "Search name, code or barcode",
                 onScanRequested = onScanProduct,
             )
-            UnitSelectorRow(
+            UnitSection(
                 choice = uiState.lineUnitChoice,
                 onSelect = onSelectLineUnit,
+                onRetry = onRetryLineUnits,
                 enabled = !uiState.isSubmitting,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -228,7 +235,11 @@ private fun CreateReturnCard(
                 FormField(
                     value = uiState.lineCostPrice,
                     onValueChange = onLineCostPriceChange,
-                    label = "Cost price",
+                    label = uiState.lineUnitChoice.selected
+                        ?.takeIf { !it.isBase }
+                        ?.let { "Cost / ${it.label}" }
+                        ?: "Cost price",
+                    helper = uiState.lineBaseCostHint,
                     keyboardType = KeyboardType.Decimal,
                     modifier = Modifier.weight(1f),
                 )

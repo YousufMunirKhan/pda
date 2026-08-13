@@ -32,6 +32,8 @@ data class PurchaseOrderDoc(
     val rejectReason: String?,
     val total: Double?,
     val lines: List<PurchaseOrderDocLine>,
+    /** When the portal created it — bounds an ambiguous-write reconciliation. */
+    val createdAtEpochMs: Long? = null,
 )
 
 /**
@@ -58,6 +60,8 @@ data class PurchaseReturnDoc(
     val rejectReason: String?,
     val total: Double?,
     val lines: List<PurchaseReturnDocLine>,
+    /** When the portal created it — bounds an ambiguous-write reconciliation. */
+    val createdAtEpochMs: Long? = null,
 )
 
 data class PurchaseReturnDocLine(
@@ -84,4 +88,6 @@ data class StockAdjustmentDoc(
     /** What the operator typed, when a non-base unit was used. */
     val enteredQuantity: Double? = null,
     val selectedUnitCode: String? = null,
+    /** When the portal created it — bounds an ambiguous-write reconciliation. */
+    val createdAtEpochMs: Long? = null,
 )

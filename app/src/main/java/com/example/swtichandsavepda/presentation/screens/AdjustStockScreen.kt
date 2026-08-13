@@ -1,5 +1,6 @@
 package com.example.swtichandsavepda.presentation.screens.adjuststock
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -46,13 +47,13 @@ import com.example.swtichandsavepda.data.model.StockAdjustmentDoc
 import com.example.swtichandsavepda.data.model.UomMath
 import com.example.swtichandsavepda.presentation.components.BrandCard
 import com.example.swtichandsavepda.presentation.components.BrandScaffold
-import com.example.swtichandsavepda.presentation.components.FeedbackBanner
 import com.example.swtichandsavepda.presentation.components.FormField
 import com.example.swtichandsavepda.presentation.components.PortalStateChip
 import com.example.swtichandsavepda.presentation.components.ReferenceOption
 import com.example.swtichandsavepda.presentation.components.ReferencePickerField
 import com.example.swtichandsavepda.presentation.components.SectionTitle
-import com.example.swtichandsavepda.presentation.components.UnitSelectorRow
+import com.example.swtichandsavepda.presentation.components.SubmitOutcomeBanner
+import com.example.swtichandsavepda.presentation.components.UnitSection
 import com.example.swtichandsavepda.ui.theme.StatusDanger
 import com.example.swtichandsavepda.ui.theme.brandColors
 
@@ -63,6 +64,7 @@ fun AdjustStockScreen(
     onSearchProducts: suspend (String) -> Result<List<ReferenceOption>>,
     onSelectProduct: (ReferenceOption) -> Unit,
     onSelectUnit: (ProductUnit) -> Unit,
+    onRetryUnits: () -> Unit,
     onQuantityChange: (String) -> Unit,
     onSearchLocations: suspend (String) -> Result<List<ReferenceOption>>,
     onSelectSourceLocation: (ReferenceOption) -> Unit,
@@ -77,10 +79,15 @@ fun AdjustStockScreen(
     onDismissMessages: () -> Unit,
     onBackClick: () -> Unit,
 ) {
+    // A stock write that has left the device cannot be un-sent, and leaving the
+    // screen would cancel our view of it without cancelling the server's. Hold
+    // the operator here until the outcome is known — the 30s timeout bounds it.
+    BackHandler(enabled = uiState.isSubmitting) { /* deliberately swallowed */ }
+
     BrandScaffold(
         title = "Adjust Stock",
         subtitle = "Create a stock adjustment draft",
-        onBackClick = onBackClick,
+        onBackClick = onBackClick.takeIf { !uiState.isSubmitting },
         actions = {
             IconButton(onClick = onRefresh) {
                 Icon(
@@ -99,11 +106,8 @@ fun AdjustStockScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            uiState.successMessage?.let { message ->
-                FeedbackBanner(message = message, isError = false, onDismiss = onDismissMessages)
-            }
-            uiState.error?.let { message ->
-                FeedbackBanner(message = message, isError = true, onDismiss = onDismissMessages)
+            uiState.outcome?.let { outcome ->
+                SubmitOutcomeBanner(outcome = outcome, onDismiss = onDismissMessages)
             }
 
             BrandCard(modifier = Modifier.fillMaxWidth()) {
@@ -130,9 +134,10 @@ fun AdjustStockScreen(
                         onScanRequested = onScanProduct,
                     )
 
-                    UnitSelectorRow(
+                    UnitSection(
                         choice = uiState.unitChoice,
                         onSelect = onSelectUnit,
+                        onRetry = onRetryUnits,
                         enabled = !uiState.isSubmitting,
                     )
 
@@ -199,8 +204,11 @@ fun AdjustStockScreen(
                         FormField(
                             value = uiState.unitCost,
                             onValueChange = onUnitCostChange,
-                            label = "Unit cost",
-                            helper = "Required, must be greater than 0.",
+                            label = uiState.unitChoice.selected
+                                ?.takeIf { !it.isBase }
+                                ?.let { "Cost per ${it.label}" }
+                                ?: "Unit cost",
+                            helper = uiState.baseCostHint ?: "Required, must be greater than 0.",
                             isError = uiState.fieldErrors.containsKey("unit_cost"),
                             enabled = !uiState.isSubmitting,
                             keyboardType = KeyboardType.Decimal,

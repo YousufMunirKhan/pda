@@ -22,11 +22,13 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Warehouse
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
@@ -40,6 +42,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import com.example.swtichandsavepda.data.local.SubmissionAttempt
 import com.example.swtichandsavepda.presentation.components.BrandScaffold
 import com.example.swtichandsavepda.presentation.components.FillColumn
 import com.example.swtichandsavepda.presentation.components.IconWell
@@ -59,6 +62,8 @@ import com.example.swtichandsavepda.ui.theme.brandColors
 
 @Composable
 fun MenuScreen(
+    uiState: MenuUiState,
+    onAcknowledgeUnresolved: (String) -> Unit,
     onAdjustStock: () -> Unit,
     onUploadNewStock: () -> Unit,
     onAddLinesToPo: () -> Unit,
@@ -90,6 +95,16 @@ fun MenuScreen(
             val itemMod = if (fill) Modifier.weight(1f) else Modifier
 
             WelcomeSection()
+
+            // Writes that were sent but never confirmed. Shown here, ahead of
+            // everything else, because the operator's next move would otherwise
+            // be to re-key a document the portal may already hold.
+            uiState.unresolved.forEach { attempt ->
+                UnresolvedAttemptCard(
+                    attempt = attempt,
+                    onAcknowledge = { onAcknowledgeUnresolved(attempt.id) },
+                )
+            }
 
             ScanHero(onClick = onScan, modifier = heroMod)
 
@@ -346,5 +361,50 @@ private fun LogOutButton(onClick: () -> Unit) {
             fontWeight = FontWeight.Bold,
             color = StatusDanger,
         )
+    }
+}
+
+/**
+ * A write whose outcome was never established.
+ *
+ * Offers only "I've checked" — never a retry. The whole point is that this
+ * document may already exist, so the one action the operator must not be nudged
+ * into is sending it again.
+ */
+@Composable
+private fun UnresolvedAttemptCard(
+    attempt: SubmissionAttempt,
+    onAcknowledge: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(WellOrange)
+            .padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.HelpOutline,
+            contentDescription = null,
+            tint = WellOrangeFg,
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Not confirmed",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                color = WellOrangeFg,
+            )
+            Text(
+                text = "${attempt.summary} — check it exists before entering it again.",
+                style = MaterialTheme.typography.bodySmall,
+                color = WellOrangeFg,
+            )
+        }
+        TextButton(onClick = onAcknowledge) {
+            Text("I've checked", color = WellOrangeFg, fontWeight = FontWeight.SemiBold)
+        }
     }
 }

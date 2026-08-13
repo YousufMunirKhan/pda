@@ -27,8 +27,24 @@ sealed class PdaApiException(message: String, cause: Throwable? = null) :
     /** 5xx — the portal errored. */
     class Server(message: String) : PdaApiException(message)
 
-    /** No/failed connection (timeouts, DNS, offline). */
+    /** No/failed connection (timeouts, DNS, offline) **before anything was sent**. */
     class Network(message: String, cause: Throwable? = null) : PdaApiException(message, cause)
+
+    /**
+     * The write left this device but no usable answer came back — a read timeout,
+     * a 5xx, or a 2xx we could not read. The document may or may not exist on the
+     * portal.
+     *
+     * **Never auto-retry an [Ambiguous] write.** Creating a purchase order,
+     * return or adjustment is not idempotent, so a blind retry is how one
+     * goods-in becomes two. Resolve it by asking the portal what it actually
+     * holds — see `reconcileCreate`.
+     */
+    class Ambiguous(
+        message: String,
+        val attemptStartedAtEpochMs: Long,
+        cause: Throwable? = null,
+    ) : PdaApiException(message, cause)
 
     /** Anything else — an unexpected status or an unparseable body. */
     class Unexpected(message: String, cause: Throwable? = null) : PdaApiException(message, cause)

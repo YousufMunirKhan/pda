@@ -23,6 +23,9 @@ import com.example.swtichandsavepda.data.remote.dto.StockAdjustmentDto
 import com.example.swtichandsavepda.data.remote.dto.StockLocationRefDto
 import com.example.swtichandsavepda.data.remote.dto.SupplierRefDto
 import com.example.swtichandsavepda.data.remote.dto.TenantDto
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 
 /** Wire → domain mappers. Keep the UI independent of the DTO shapes. */
 
@@ -55,6 +58,7 @@ fun PurchaseOrderDto.toDomain(): PurchaseOrderDoc = PurchaseOrderDoc(
             selectedUnitCode = line.selectedUnitCode,
         )
     },
+    createdAtEpochMs = parsePortalInstantMs(createdAt),
 )
 
 fun PurchaseReturnDto.toDomain(): PurchaseReturnDoc = PurchaseReturnDoc(
@@ -76,6 +80,7 @@ fun PurchaseReturnDto.toDomain(): PurchaseReturnDoc = PurchaseReturnDoc(
             selectedUnitCode = line.selectedUnitCode,
         )
     },
+    createdAtEpochMs = parsePortalInstantMs(createdAt),
 )
 
 fun ProductRefDto.toDomain(): ProductRef = ProductRef(
@@ -133,7 +138,7 @@ fun ProductUnitDto.toDomain(): ProductUnit = ProductUnit(
  * Never let a 0 through — it would make every base quantity 0 (and, dividing a
  * cost, blow up).
  */
-private fun Double?.orBaseConversion(): Double = this?.takeIf { it > 0.0 } ?: 1.0
+private fun Double?.orBaseConversion(): Double = this?.takeIf { it > 0.0 && it.isFinite() } ?: 1.0
 
 fun SupplierRefDto.toDomain(): SupplierRef = SupplierRef(
     id = id,
@@ -163,4 +168,19 @@ fun StockAdjustmentDto.toDomain(): StockAdjustmentDoc = StockAdjustmentDoc(
     rejectReason = rejectReason,
     enteredQuantity = enteredQuantity,
     selectedUnitCode = selectedUnitCode,
+    createdAtEpochMs = parsePortalInstantMs(createdAt),
 )
+
+/**
+ * Portal timestamps arrive as ISO-8601 with microseconds
+ * ("2026-07-27T00:00:00.000000Z"), but Laravel can also serialise a plain
+ * "yyyy-MM-dd HH:mm:ss". Parse both; an unparseable value yields null rather
+ * than throwing, since this only ever narrows a reconciliation window.
+ */
+internal fun parsePortalInstantMs(raw: String?): Long? {
+    val text = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    runCatching { return Instant.parse(text).toEpochMilli() }
+    return runCatching {
+        LocalDateTime.parse(text.replace(' ', 'T')).toInstant(ZoneOffset.UTC).toEpochMilli()
+    }.getOrNull()
+}

@@ -111,6 +111,11 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.kotlinx.serialization.json)
+    // Drives the real OkHttp/Retrofit stack so the write-failure classification
+    // (sent vs not-sent) can be tested against actual socket behaviour.
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.retrofit)
+    testImplementation(libs.retrofit.kotlinx.serialization.converter)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     debugImplementation(libs.compose.ui.tooling)

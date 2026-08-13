@@ -145,7 +145,11 @@ fun AppNavigation() {
 
         composable(Screen.Menu.route) {
             val viewModel: MenuViewModel = hiltViewModel()
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
             MenuScreen(
+                uiState = uiState,
+                onAcknowledgeUnresolved = viewModel::acknowledge,
                 onAdjustStock = { navController.navigate(Screen.AdjustStock.route) },
                 onUploadNewStock = { navController.navigate(Screen.UploadStock.route) },
                 onAddLinesToPo = { navController.navigate(Screen.PurchaseOrder.route) },
@@ -171,6 +175,7 @@ fun AppNavigation() {
                 onSearchProducts = viewModel::searchProducts,
                 onSelectProduct = viewModel::selectProduct,
                 onSelectUnit = viewModel::selectUnit,
+                onRetryUnits = viewModel::retryUnits,
                 onQuantityChange = viewModel::setQuantity,
                 onSearchLocations = viewModel::searchLocations,
                 onSelectSourceLocation = viewModel::selectSourceLocation,
@@ -196,6 +201,7 @@ fun AppNavigation() {
                 onSearchProducts = viewModel::searchProducts,
                 onSelectProduct = viewModel::selectProduct,
                 onSelectUnit = viewModel::selectUnit,
+                onRetryUnits = viewModel::retryUnits,
                 onQuantityChange = viewModel::setQuantity,
                 onUnitCostChange = viewModel::setUnitCost,
                 onReasonChange = viewModel::setReason,
@@ -218,6 +224,7 @@ fun AppNavigation() {
                 onSearchProducts = viewModel::searchProducts,
                 onSelectLineProduct = viewModel::selectLineProduct,
                 onSelectLineUnit = viewModel::selectLineUnit,
+                onRetryLineUnits = viewModel::retryLineUnits,
                 onLineQuantityChange = viewModel::setLineQuantity,
                 onLineUnitCostChange = viewModel::setLineUnitCost,
                 onAddLine = viewModel::addLine,
@@ -245,6 +252,7 @@ fun AppNavigation() {
                 onSearchProducts = viewModel::searchProducts,
                 onSelectLineProduct = viewModel::selectLineProduct,
                 onSelectLineUnit = viewModel::selectLineUnit,
+                onRetryLineUnits = viewModel::retryLineUnits,
                 onLineQuantityChange = viewModel::setLineQuantity,
                 onLineCostPriceChange = viewModel::setLineCostPrice,
                 onLineReasonChange = viewModel::setLineReason,

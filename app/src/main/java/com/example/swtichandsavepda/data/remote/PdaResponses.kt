@@ -5,15 +5,24 @@ import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.JsonElement
 
 /**
- * Folds a create/edit/receive/cancel envelope into a domain [Result]. A 2xx with
- * no `data` is treated as an unexpected response (the API always echoes the
- * document on success).
+ * Folds a create/edit/receive/cancel envelope into a domain [Result].
+ *
+ * A 2xx with no `data` means the portal **accepted** the write and we could not
+ * read what it produced — which is [PdaApiException.Ambiguous], never a failure.
+ * Reporting it as a failure would invite a retry against a document that already
+ * exists; the caller resolves it by reconciling instead.
  */
-fun <D, R> Result<DocumentEnvelope<D>>.mapDocument(transform: (D) -> R): Result<R> = fold(
+fun <D, R> Result<DocumentEnvelope<D>>.mapDocument(
+    attempt: WriteAttempt,
+    transform: (D) -> R,
+): Result<R> = fold(
     onSuccess = { envelope ->
         envelope.data?.let { Result.success(transform(it)) }
             ?: Result.failure(
-                PdaApiException.Unexpected(envelope.message ?: "The server returned no document."),
+                PdaApiException.Ambiguous(
+                    envelope.message ?: "The server accepted this but returned no document.",
+                    attempt.startedAtEpochMs,
+                ),
             )
     },
     onFailure = { Result.failure(it) },

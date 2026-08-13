@@ -64,7 +64,7 @@ object UomMath {
 
     /** entered quantity × conversion → the base-unit quantity the POS books. */
     fun baseQuantity(enteredQuantity: Double, conversionToBase: Double): Double {
-        if (conversionToBase <= 0.0) return enteredQuantity
+        if (!isUsable(enteredQuantity, conversionToBase)) return enteredQuantity
         return BigDecimal.valueOf(enteredQuantity)
             .multiply(BigDecimal.valueOf(conversionToBase))
             .setScale(SCALE, RoundingMode.HALF_UP)
@@ -73,11 +73,21 @@ object UomMath {
 
     /** entered unit cost ÷ conversion → the cost of one base unit. */
     fun baseUnitCost(enteredUnitCost: Double, conversionToBase: Double): Double {
-        if (conversionToBase <= 0.0) return enteredUnitCost
+        if (!isUsable(enteredUnitCost, conversionToBase)) return enteredUnitCost
         return BigDecimal.valueOf(enteredUnitCost)
             .divide(BigDecimal.valueOf(conversionToBase), SCALE, RoundingMode.HALF_UP)
             .toDouble()
     }
+
+    /**
+     * `BigDecimal.valueOf` throws `NumberFormatException` on NaN or infinity,
+     * and that would escape `safeApiCall` (which catches IO/HTTP/serialization,
+     * not arithmetic) and kill the coroutine. A portal sending `"1e400"` for a
+     * conversion is exotic but must not crash a stock write, so fall back to
+     * treating the value as already-base.
+     */
+    private fun isUsable(value: Double, conversionToBase: Double): Boolean =
+        value.isFinite() && conversionToBase.isFinite() && conversionToBase > 0.0
 
     /** Drops the trailing ".0" so a conversion of 12.0 reads as "12". */
     fun pretty(value: Double): String =

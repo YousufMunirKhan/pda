@@ -3,6 +3,8 @@ package com.example.swtichandsavepda.presentation.screens.purchaseorder
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.swtichandsavepda.data.local.AttemptState
+import com.example.swtichandsavepda.data.local.SubmissionJournal
 import com.example.swtichandsavepda.data.model.NewPurchaseOrderLine
 import com.example.swtichandsavepda.data.model.ProductUnit
 import com.example.swtichandsavepda.data.model.PurchaseOrderDoc
@@ -10,17 +12,22 @@ import com.example.swtichandsavepda.data.model.UomMath
 import com.example.swtichandsavepda.data.remote.PdaApiException
 import com.example.swtichandsavepda.data.repository.PdaPurchaseOrderRepository
 import com.example.swtichandsavepda.data.repository.PdaReferenceRepository
+import com.example.swtichandsavepda.di.WriteScope
+import com.example.swtichandsavepda.presentation.SubmitOutcome
 import com.example.swtichandsavepda.presentation.UnitChoice
 import com.example.swtichandsavepda.presentation.components.ReferenceOption
 import com.example.swtichandsavepda.presentation.components.toOption
 import com.example.swtichandsavepda.presentation.loadUnitChoice
+import com.example.swtichandsavepda.presentation.newAttemptId
 import com.example.swtichandsavepda.presentation.scannedProduct
 import com.example.swtichandsavepda.presentation.screens.adjuststock.pretty
 import com.example.swtichandsavepda.presentation.screens.adjuststock.sanitizeDecimal
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -57,14 +64,18 @@ data class PurchaseOrderUiState(
     val isLoading: Boolean = false,
     val busyOrderId: Long? = null,
     // Messaging
-    val error: String? = null,
     val fieldErrors: Map<String, List<String>> = emptyMap(),
-    val successMessage: String? = null,
+    val outcome: SubmitOutcome? = null,
 ) {
     val lineBaseQuantityHint: String? get() = lineUnitChoice.baseQuantityHint(lineQuantity)
 
+    val lineBaseCostHint: String? get() = lineUnitChoice.baseCostHint(lineUnitCost)
+
     val canAddLine: Boolean
         get() = lineProduct != null &&
+            // Until the units lookup resolves we do not know what the typed
+            // quantity means — see UnitChoice.
+            lineUnitChoice.isResolved &&
             (lineQuantity.toDoubleOrNull() ?: 0.0) > 0.0 &&
             (lineUnitCost.toDoubleOrNull() ?: 0.0) > 0.0
 
@@ -89,6 +100,9 @@ data class PurchaseOrderUiState(
 class PurchaseOrderViewModel @Inject constructor(
     private val repository: PdaPurchaseOrderRepository,
     private val referenceRepository: PdaReferenceRepository,
+    private val journal: SubmissionJournal,
+    /** Stock writes outlive this screen — see [WriteScope]. */
+    @WriteScope private val writeScope: CoroutineScope,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -111,7 +125,7 @@ class PurchaseOrderViewModel @Inject constructor(
         referenceRepository.searchProducts(query).map { list -> list.map { it.toOption() } }
 
     fun selectSupplier(option: ReferenceOption) {
-        _uiState.update { it.copy(supplier = option, error = null) }
+        _uiState.update { it.copy(supplier = option, outcome = null) }
     }
 
     fun selectLineProduct(option: ReferenceOption) = selectLineProduct(option, null)
@@ -120,21 +134,38 @@ class PurchaseOrderViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 lineProduct = option,
-                lineUnitChoice = UnitChoice(),
+                lineUnitChoice = UnitChoice(status = UnitChoice.Status.Loading),
                 // Prefill the unit cost from the product's cost when known.
                 lineUnitCost = option.cost?.let { cost -> "%.2f".format(cost) } ?: it.lineUnitCost,
-                error = null,
+                outcome = null,
             )
         }
         loadLineUnits(option.id, preferredProductUnitId)
     }
 
+    /** Retry after a failed units lookup, from the banner the screen shows. */
+    fun retryLineUnits() {
+        val productId = _uiState.value.lineProduct?.id ?: return
+        _uiState.update { it.copy(lineUnitChoice = UnitChoice(status = UnitChoice.Status.Loading)) }
+        loadLineUnits(productId, null)
+    }
+
     private fun loadLineUnits(productId: Long, preferredProductUnitId: Long?) {
         viewModelScope.launch {
             val choice = referenceRepository.loadUnitChoice(productId, preferredProductUnitId)
-            // Ignore a late response for a product the operator has moved on from.
-            _uiState.update {
-                if (it.lineProduct?.id == productId) it.copy(lineUnitChoice = choice) else it
+            _uiState.update { state ->
+                // Ignore a late response for a product the operator has moved on from.
+                if (state.lineProduct?.id != productId) return@update state
+                state.copy(
+                    lineUnitChoice = choice,
+                    // The prefill applied on product selection was the product's
+                    // BASE cost; if a non-base unit auto-selects, that figure is
+                    // per the wrong unit.
+                    lineUnitCost = choice.selected?.let { unit ->
+                        unit.purchaseCost?.let { "%.2f".format(it) }
+                            ?: if (unit.isBase) state.lineUnitCost else ""
+                    } ?: state.lineUnitCost,
+                )
             }
         }
     }
@@ -145,27 +176,28 @@ class PurchaseOrderViewModel @Inject constructor(
                 lineUnitChoice = state.lineUnitChoice.copy(selected = unit),
                 // The typed quantity and cost meant the previous unit.
                 lineQuantity = "",
-                lineUnitCost = unit.purchaseCost?.let { "%.2f".format(it) } ?: state.lineUnitCost,
-                error = null,
+                lineUnitCost = unit.purchaseCost?.let { "%.2f".format(it) }
+                    ?: if (unit.isBase) state.lineUnitCost else "",
+                outcome = null,
             )
         }
     }
 
     fun setDeliveryDate(text: String) {
-        _uiState.update { it.copy(deliveryDate = text, error = null) }
+        _uiState.update { it.copy(deliveryDate = text, outcome = null) }
     }
 
     fun setLineQuantity(text: String) {
         _uiState.update {
             it.copy(
                 lineQuantity = sanitizeDecimal(text, it.lineUnitChoice.quantityDecimals),
-                error = null,
+                outcome = null,
             )
         }
     }
 
     fun setLineUnitCost(text: String) {
-        _uiState.update { it.copy(lineUnitCost = sanitizeDecimal(text), error = null) }
+        _uiState.update { it.copy(lineUnitCost = sanitizeDecimal(text), outcome = null) }
     }
 
     fun addLine() {
@@ -196,35 +228,70 @@ class PurchaseOrderViewModel @Inject constructor(
     }
 
     fun dismissMessages() {
-        _uiState.update { it.copy(error = null, successMessage = null, fieldErrors = emptyMap()) }
+        _uiState.update { it.copy(outcome = null, fieldErrors = emptyMap()) }
     }
 
     fun submit() {
-        val state = _uiState.value
-        if (!state.canSubmit) return
-        val supplierId = state.supplier?.id ?: return
-        val lines = state.draftLines.map {
+        // Build the request from a snapshot first, so none of the early returns
+        // below can leave isSubmitting stuck true after the claim.
+        val snapshot = _uiState.value
+        if (!snapshot.canSubmit) return
+        val supplier = snapshot.supplier ?: return
+        val lines = snapshot.draftLines.map {
             NewPurchaseOrderLine(it.product.id, it.quantity, it.unitCost, it.unit)
         }
 
-        viewModelScope.launch {
-            _uiState.update {
-                it.copy(isSubmitting = true, error = null, successMessage = null, fieldErrors = emptyMap())
+        // Claim atomically: getAndUpdate returns the PREVIOUS value, so exactly
+        // one caller observes canSubmit == true and proceeds, regardless of
+        // dispatcher. The old read-then-launch guard only held because
+        // viewModelScope is Main.immediate — and this write no longer runs there.
+        val claimed = _uiState.getAndUpdate { state ->
+            if (state.canSubmit) {
+                state.copy(isSubmitting = true, outcome = null, fieldErrors = emptyMap())
+            } else {
+                state
             }
-            repository.create(supplierId, state.deliveryDate, lines)
+        }
+        if (!claimed.canSubmit) return
+
+        val attemptId = newAttemptId()
+        val summary = "PO · ${supplier.title} · ${lines.size} line(s)"
+
+        writeScope.launch {
+            // Journalled BEFORE the request, so a document can never exist on the
+            // portal without a local record that we tried.
+            journal.begin(attemptId, DOCUMENT_TYPE, summary, System.currentTimeMillis())
+
+            repository.create(supplier.id, snapshot.deliveryDate, lines)
                 .onSuccess { doc ->
+                    journal.resolve(attemptId, AttemptState.CREATED, doc.id)
                     _uiState.update {
                         it.copy(
                             isSubmitting = false,
                             supplier = null,
                             deliveryDate = "",
                             draftLines = emptyList(),
-                            successMessage = "PO ${doc.reference} created — ${doc.portalState.pretty()}.",
+                            outcome = SubmitOutcome.Created(
+                                "PO ${doc.reference} created — ${doc.portalState.pretty()}.",
+                            ),
                         )
                     }
                     loadOrders()
                 }
-                .onFailure { throwable -> _uiState.update { it.applyError(throwable) } }
+                .onFailure { throwable ->
+                    journal.resolve(
+                        attemptId,
+                        if (throwable is PdaApiException.Ambiguous) {
+                            AttemptState.UNKNOWN
+                        } else {
+                            AttemptState.NOT_CREATED
+                        },
+                    )
+                    _uiState.update { it.applyFailure(throwable) }
+                    // An unresolved write must be checked against what the portal
+                    // actually holds, so refresh the list in front of the operator.
+                    if (throwable is PdaApiException.Ambiguous) loadOrders()
+                }
         }
     }
 
@@ -237,17 +304,28 @@ class PurchaseOrderViewModel @Inject constructor(
         verb: String,
         action: suspend () -> Result<PurchaseOrderDoc>,
     ) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(busyOrderId = orderId, error = null, successMessage = null) }
+        // busyOrderId is a single slot: without an atomic claim, starting a second
+        // mutation erases the first's in-flight marker and re-enables its buttons
+        // mid-flight. Receive is the one PO operation that moves stock.
+        val claimed = _uiState.getAndUpdate { state ->
+            if (state.busyOrderId == null) state.copy(busyOrderId = orderId, outcome = null) else state
+        }
+        if (claimed.busyOrderId != null) return
+
+        writeScope.launch {
             action()
                 .onSuccess { doc ->
                     _uiState.update {
-                        it.copy(busyOrderId = null, successMessage = "PO ${doc.reference} $verb.")
+                        it.copy(
+                            busyOrderId = null,
+                            outcome = SubmitOutcome.Created("PO ${doc.reference} $verb."),
+                        )
                     }
                     loadOrders()
                 }
                 .onFailure { throwable ->
-                    _uiState.update { it.copy(busyOrderId = null).applyError(throwable) }
+                    _uiState.update { it.copy(busyOrderId = null).applyFailure(throwable) }
+                    if (throwable is PdaApiException.Ambiguous) loadOrders()
                 }
         }
     }
@@ -258,20 +336,43 @@ class PurchaseOrderViewModel @Inject constructor(
             repository.list()
                 .onSuccess { orders -> _uiState.update { it.copy(isLoading = false, orders = orders) } }
                 .onFailure { throwable ->
-                    _uiState.update { it.copy(isLoading = false).applyError(throwable) }
+                    _uiState.update { it.copy(isLoading = false).applyFailure(throwable) }
                 }
         }
     }
 
-    private fun PurchaseOrderUiState.applyError(throwable: Throwable): PurchaseOrderUiState =
+    /**
+     * Maps a failed write onto the form. [PdaApiException.Ambiguous] clears the
+     * draft rather than leaving it ready to re-send, which is how one PO becomes
+     * two.
+     */
+    private fun PurchaseOrderUiState.applyFailure(throwable: Throwable): PurchaseOrderUiState =
         when (throwable) {
+            is PdaApiException.Ambiguous -> PurchaseOrderUiState(
+                orders = orders,
+                outcome = SubmitOutcome.Unresolved(
+                    "${throwable.message} Check the list below before creating it again.",
+                ),
+            )
+
             is PdaApiException.Validation -> copy(
                 isSubmitting = false,
-                error = throwable.message,
+                outcome = SubmitOutcome.Failed(throwable.message.orEmpty()),
                 fieldErrors = throwable.fieldErrors,
             )
 
-            is PdaApiException -> copy(isSubmitting = false, error = throwable.message)
-            else -> copy(isSubmitting = false, error = "Something went wrong. Please try again.")
+            is PdaApiException -> copy(
+                isSubmitting = false,
+                outcome = SubmitOutcome.Failed(throwable.message.orEmpty()),
+            )
+
+            else -> copy(
+                isSubmitting = false,
+                outcome = SubmitOutcome.Failed("Something went wrong. Please try again."),
+            )
         }
+
+    private companion object {
+        const val DOCUMENT_TYPE = "purchase_order"
+    }
 }
