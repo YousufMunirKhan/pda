@@ -1,0 +1,29 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+      The XML theme only backs the window/status bar before Compose takes over.
+      The in-app design system lives in ui/theme/Theme.kt.
+    -->
+    <style name="Theme.Swtichandsavepda" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorPrimaryVariant">@color/brand_primary_dark</item>
+        <item name="colorPrimaryContainer">@color/brand_primary_light</item>
+        <item name="colorOnPrimary">@color/white</item>
+
+        <item name="colorSecondary">@color/brand_accent</item>
+        <item name="colorSecondaryVariant">@color/brand_accent</item>
+        <item name="colorOnSecondary">@color/white</item>
+
+        <item name="colorSurface">@color/surface_light</item>
+        <item name="colorOnSurface">@color/slate_900</item>
+        <item name="android:windowBackground">@color/canvas_light</item>
+
+        <item name="colorError">@color/status_danger</item>
+        <item name="colorOnError">@color/white</item>
+        <item name="colorOutline">@color/slate_500</item>
+        <item name="colorOutlineVariant">@color/slate_200</item>
+
+        <item name="android:statusBarColor">@color/brand_primary_dark</item>
+        <item name="android:navigationBarColor">@color/canvas_light</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
+    </style>
+</resources>

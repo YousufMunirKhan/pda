@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Brand palette shared with the Switch&Save EPOS app (switchandsavepos).
+  Mirrors its theme8 / GRADIENT scheme. Compose reads these values from
+  ui/theme/Color.kt; this file backs the XML theme (status bar, window bg).
+-->
+<resources>
+    <!-- Brand (theme8 / GRADIENT) -->
+    <color name="brand_primary">#2563EB</color>
+    <color name="brand_primary_dark">#1D4ED8</color>
+    <color name="brand_primary_light">#EEF6FF</color>
+    <color name="brand_accent">#10B981</color>
+
+    <!-- Neutral / slate ramp -->
+    <color name="slate_900">#0F172A</color>
+    <color name="slate_500">#64748B</color>
+    <color name="slate_200">#E2E8F0</color>
+
+    <!-- Surfaces -->
+    <color name="canvas_light">#F8FBFF</color>
+    <color name="surface_light">#FFFFFF</color>
+    <color name="dark_bg">#12151C</color>
+    <color name="dark_surface">#1E232D</color>
+    <color name="dark_text_primary">#F1F5F9</color>
+
+    <!-- Status -->
+    <color name="status_success">#16A34A</color>
+    <color name="status_warning">#EA580C</color>
+    <color name="status_danger">#DC2626</color>
+
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

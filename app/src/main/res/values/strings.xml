@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Switch&amp;Save PDA</string>
+
+    <!-- Sign-in (email/password against the live PDA portal) -->
+    <string name="login_brand_tagline">Smart solutions for smart businesses</string>
+    <string name="login_credentials_title">Operator sign-in</string>
+    <string name="login_credentials_helper">Sign in with your warehouse account.</string>
+    <string name="login_email_hint">Email</string>
+    <string name="login_password_hint">Password</string>
+    <string name="login_sign_in_cta">Sign In</string>
+    <string name="login_signing_in_cta">Signing in…</string>
+
+    <!-- Login card footer -->
+    <string name="login_contact_label_support">Support</string>
+    <string name="login_footer_support_phone">07742 089381</string>
+</resources>
