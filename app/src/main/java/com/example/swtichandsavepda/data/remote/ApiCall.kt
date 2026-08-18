@@ -106,7 +106,11 @@ private fun HttpException.toPdaException(): PdaApiException {
         401 -> PdaApiException.Unauthorized(message)
         403 -> PdaApiException.Forbidden(message)
         404 -> PdaApiException.NotFound(message)
-        422 -> PdaApiException.Validation(message, error?.errors.orEmpty())
+        422 -> PdaApiException.Validation(
+            message,
+            error?.errors.orEmpty(),
+            error?.failureCode,
+        )
         in 500..599 -> PdaApiException.Server(message)
         else -> PdaApiException.Unexpected(message)
     }

@@ -24,4 +24,16 @@ data class ApiErrorBody(
     val success: Boolean? = null,
     val message: String? = null,
     val errors: Map<String, List<String>>? = null,
-)
+    /**
+     * Machine-readable reason, e.g. `OVER_RECEIPT`, `PO_CANCELLED`.
+     *
+     * Two spellings are parsed because the portal team announced the codes
+     * without pinning the envelope key, and `ignoreUnknownKeys` means the wrong
+     * guess would be dropped silently rather than failing loudly.
+     * NEEDS VERIFICATION: confirm which key the portal actually sends.
+     */
+    val code: String? = null,
+    val errorCode: String? = null,
+) {
+    val failureCode: String? get() = code ?: errorCode
+}

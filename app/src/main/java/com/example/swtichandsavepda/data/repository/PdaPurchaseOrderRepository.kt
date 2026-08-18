@@ -2,12 +2,14 @@ package com.example.swtichandsavepda.data.repository
 
 import com.example.swtichandsavepda.data.model.NewPurchaseOrderLine
 import com.example.swtichandsavepda.data.model.PurchaseOrderDoc
+import com.example.swtichandsavepda.data.model.ReturnableLine
 import com.example.swtichandsavepda.data.remote.PdaApiService
 import com.example.swtichandsavepda.data.remote.WriteAttempt
 import com.example.swtichandsavepda.data.remote.dto.PurchaseOrderDto
 import com.example.swtichandsavepda.data.remote.dto.PurchaseOrderRequest
 import com.example.swtichandsavepda.data.remote.dto.ReceiveItemRequest
 import com.example.swtichandsavepda.data.remote.dto.ReceivePurchaseOrderRequest
+import com.example.swtichandsavepda.data.remote.dto.ReturnableLineDto
 import com.example.swtichandsavepda.data.remote.mapDocument
 import com.example.swtichandsavepda.data.remote.mapRows
 import com.example.swtichandsavepda.data.remote.safeApiCall
@@ -33,13 +35,29 @@ interface PdaPurchaseOrderRepository {
         lines: List<NewPurchaseOrderLine>,
     ): Result<PurchaseOrderDoc>
 
-    /** Receive everything ([receivedByProduct] empty) or the named quantities. */
+    /**
+     * Books in a delivery. [receivedByProduct] is what arrived **now** — the
+     * portal adds it to the running total — so an empty map means "everything
+     * still outstanding".
+     *
+     * [referenceNo] is the supplier's delivery note; [clientReference] the
+     * idempotency key that makes a retry safe.
+     */
     suspend fun receive(
         id: Long,
         receivedByProduct: Map<Long, Double> = emptyMap(),
+        referenceNo: String? = null,
+        note: String? = null,
+        clientReference: String? = null,
     ): Result<PurchaseOrderDoc>
 
     suspend fun list(): Result<List<PurchaseOrderDoc>>
+
+    /**
+     * What can still be returned against this PO, per line, straight from the
+     * portal. See [ReturnableLine] for why it is a guide rather than a control.
+     */
+    suspend fun returnable(id: Long): Result<List<ReturnableLine>>
 
     suspend fun cancel(id: Long): Result<PurchaseOrderDoc>
 }
@@ -84,20 +102,25 @@ class PdaPurchaseOrderRepositoryImpl @Inject constructor(
     }
 
     /**
-     * NEEDS VERIFICATION: whether a second receive on an already-received PO is
-     * a no-op or double-receives. Until that is answered this is treated as
-     * non-idempotent — an ambiguous receive is reported as such rather than
-     * retried, but it cannot be auto-reconciled because a received PO looks the
-     * same however many times it was received.
+     * A receive is a delta the portal accumulates, so it is emphatically not
+     * idempotent on its own — receiving 2 twice books 4. [clientReference] is
+     * what makes a retry safe: the portal returns the existing GRN instead of
+     * appending a second one.
      */
     override suspend fun receive(
         id: Long,
         receivedByProduct: Map<Long, Double>,
+        referenceNo: String?,
+        note: String?,
+        clientReference: String?,
     ): Result<PurchaseOrderDoc> {
         val body = ReceivePurchaseOrderRequest(
             items = receivedByProduct
                 .takeIf { it.isNotEmpty() }
                 ?.map { (productId, quantity) -> ReceiveItemRequest(productId, quantity) },
+            clientReference = clientReference,
+            referenceNo = referenceNo?.trim()?.ifBlank { null },
+            note = note?.trim()?.ifBlank { null },
         )
         val attempt = WriteAttempt()
         return safeWriteCall(attempt) { api.receivePurchaseOrder(id, body, attempt) }
@@ -107,6 +130,10 @@ class PdaPurchaseOrderRepositoryImpl @Inject constructor(
     override suspend fun list(): Result<List<PurchaseOrderDoc>> =
         safeApiCall { api.listPurchaseOrders() }
             .mapRows(PurchaseOrderDto.serializer(), PurchaseOrderDto::toDomain)
+
+    override suspend fun returnable(id: Long): Result<List<ReturnableLine>> =
+        safeApiCall { api.purchaseOrderReturnable(id) }
+            .mapRows(ReturnableLineDto.serializer(), ReturnableLineDto::toDomain)
 
     override suspend fun cancel(id: Long): Result<PurchaseOrderDoc> {
         val attempt = WriteAttempt()

@@ -7,9 +7,12 @@ import com.example.swtichandsavepda.data.local.AttemptState
 import com.example.swtichandsavepda.data.local.SubmissionJournal
 import com.example.swtichandsavepda.data.model.NewPurchaseReturnLine
 import com.example.swtichandsavepda.data.model.ProductUnit
+import com.example.swtichandsavepda.data.model.PurchaseOrderDoc
 import com.example.swtichandsavepda.data.model.PurchaseReturnDoc
+import com.example.swtichandsavepda.data.model.ReturnableLine
 import com.example.swtichandsavepda.data.model.UomMath
 import com.example.swtichandsavepda.data.remote.PdaApiException
+import com.example.swtichandsavepda.data.repository.PdaPurchaseOrderRepository
 import com.example.swtichandsavepda.data.repository.PdaPurchaseReturnRepository
 import com.example.swtichandsavepda.data.repository.PdaReferenceRepository
 import com.example.swtichandsavepda.di.WriteScope
@@ -42,12 +45,24 @@ data class PrDraftLine(
     val costPrice: Double,
     val reason: String,
     val unit: ProductUnit? = null,
+    /** Set when the line was picked from a PO's returnable list. */
+    val purchaseOrderItemId: Long? = null,
 ) {
     val quantityLabel: String
         get() = UomMath.pretty(quantity) + (unit?.takeIf { !it.isBase }?.let { " ${it.label}" } ?: "")
 }
 
 data class PurchaseReturnUiState(
+    /**
+     * The PO these goods came in on. Null is a plain supplier-level return,
+     * which is the behaviour that existed before PO linking and still works.
+     */
+    val purchaseOrder: PurchaseOrderDoc? = null,
+    val returnableLines: List<ReturnableLine> = emptyList(),
+    val isLoadingReturnable: Boolean = false,
+    val returnableError: String? = null,
+    /** The returnable line currently being added, when returning against a PO. */
+    val selectedReturnable: ReturnableLine? = null,
     val supplier: ReferenceOption? = null,
     val referenceNo: String = "",
     val returnReason: String = "",
@@ -64,12 +79,38 @@ data class PurchaseReturnUiState(
     val fieldErrors: Map<String, List<String>> = emptyMap(),
     val outcome: SubmitOutcome? = null,
 ) {
+    val isAgainstPurchaseOrder: Boolean get() = purchaseOrder != null
+
+    /** Only lines with something left to send back can be picked. */
+    val pickableReturnableLines: List<ReturnableLine>
+        get() = returnableLines.filter { it.canReturn }
+
+    /**
+     * How much of the selected PO line is left, minus anything already staged
+     * for it in this return — otherwise two draft lines could each pass the
+     * limit while together exceeding it.
+     */
+    val selectedReturnableRemaining: Double
+        get() {
+            val line = selectedReturnable ?: return 0.0
+            val staged = draftLines
+                .filter { it.purchaseOrderItemId == line.purchaseOrderItemId }
+                .sumOf { it.quantity }
+            return (line.quantityReturnable - staged).coerceAtLeast(0.0)
+        }
+
+    val lineExceedsReturnable: Boolean
+        get() = isAgainstPurchaseOrder &&
+            selectedReturnable != null &&
+            (lineQuantity.toDoubleOrNull() ?: 0.0) > selectedReturnableRemaining
+
     val lineBaseQuantityHint: String? get() = lineUnitChoice.baseQuantityHint(lineQuantity)
 
     val lineBaseCostHint: String? get() = lineUnitChoice.baseCostHint(lineCostPrice)
 
     val canAddLine: Boolean
         get() = lineProduct != null &&
+            !lineExceedsReturnable &&
             // Until the units lookup resolves we do not know what the typed
             // quantity means - see UnitChoice.
             lineUnitChoice.isResolved &&
@@ -88,6 +129,7 @@ data class PurchaseReturnUiState(
 @HiltViewModel
 class PurchaseReturnViewModel @Inject constructor(
     private val repository: PdaPurchaseReturnRepository,
+    private val purchaseOrderRepository: PdaPurchaseOrderRepository,
     private val referenceRepository: PdaReferenceRepository,
     private val journal: SubmissionJournal,
     /** Stock writes outlive this screen - see [WriteScope]. */
@@ -111,6 +153,108 @@ class PurchaseReturnViewModel @Inject constructor(
 
     suspend fun searchProducts(query: String): Result<List<ReferenceOption>> =
         referenceRepository.searchProducts(query).map { list -> list.map { it.toOption() } }
+
+    /** Purchase orders worth returning against: something has actually arrived. */
+    suspend fun searchPurchaseOrders(query: String): Result<List<ReferenceOption>> =
+        purchaseOrderRepository.list().map { orders ->
+            orders
+                .filter { it.receivedTotal > 0.0 }
+                .filter { query.isBlank() || it.reference.contains(query, ignoreCase = true) }
+                .map { order ->
+                    ReferenceOption(
+                        id = order.id,
+                        title = order.reference,
+                        subtitle = listOfNotNull(
+                            order.supplierName,
+                            "${UomMath.pretty(order.receivedTotal)} received",
+                        ).joinToString(" · "),
+                    )
+                }
+        }
+
+    /**
+     * Links this return to a PO and loads what can still be sent back.
+     *
+     * The supplier is taken from the PO rather than left to the operator: the
+     * portal rejects a return whose supplier differs from the PO's, and there is
+     * no reason to let someone walk into that.
+     */
+    fun selectPurchaseOrder(option: ReferenceOption) {
+        _uiState.update {
+            it.copy(
+                isLoadingReturnable = true,
+                returnableError = null,
+                returnableLines = emptyList(),
+                selectedReturnable = null,
+                lineProduct = null,
+                draftLines = emptyList(),
+                outcome = null,
+            )
+        }
+        viewModelScope.launch {
+            val order = purchaseOrderRepository.list().getOrNull()
+                ?.firstOrNull { it.id == option.id }
+            purchaseOrderRepository.returnable(option.id)
+                .onSuccess { lines ->
+                    _uiState.update { state ->
+                        state.copy(
+                            purchaseOrder = order,
+                            returnableLines = lines,
+                            isLoadingReturnable = false,
+                            supplier = order?.supplierId?.let { id ->
+                                ReferenceOption(id = id, title = order.supplierName ?: "Supplier #$id")
+                            } ?: state.supplier,
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(
+                            isLoadingReturnable = false,
+                            returnableError = throwable.message
+                                ?: "Couldn't load what can be returned.",
+                        )
+                    }
+                }
+        }
+    }
+
+    /** Drops the PO link and goes back to a plain supplier-level return. */
+    fun clearPurchaseOrder() {
+        _uiState.update {
+            it.copy(
+                purchaseOrder = null,
+                returnableLines = emptyList(),
+                selectedReturnable = null,
+                returnableError = null,
+                lineProduct = null,
+                draftLines = emptyList(),
+                outcome = null,
+            )
+        }
+    }
+
+    /** Picks one of the PO's returnable lines to stage. */
+    fun selectReturnableLine(line: ReturnableLine) {
+        _uiState.update {
+            it.copy(
+                selectedReturnable = line,
+                lineProduct = ReferenceOption(
+                    id = line.productId,
+                    title = line.productName,
+                    subtitle = line.summary,
+                    cost = line.unitCost,
+                ),
+                // Cost comes from the PO line: a return must be valued at what
+                // the goods came in at, not at today's product cost.
+                lineCostPrice = "%.2f".format(line.unitCost),
+                lineQuantity = "",
+                // The PO line already fixes the unit, so there is nothing to choose.
+                lineUnitChoice = UnitChoice(),
+                outcome = null,
+            )
+        }
+    }
 
     fun selectSupplier(option: ReferenceOption) {
         _uiState.update { it.copy(supplier = option, outcome = null) }
@@ -204,11 +348,13 @@ class PurchaseReturnViewModel @Inject constructor(
             costPrice = state.lineCostPrice.toDouble(),
             reason = state.lineReason.trim(),
             unit = state.lineUnitChoice.unitForRequest,
+            purchaseOrderItemId = state.selectedReturnable?.purchaseOrderItemId,
         )
         _uiState.update {
             it.copy(
                 draftLines = it.draftLines + line,
                 lineProduct = null,
+                selectedReturnable = null,
                 lineUnitChoice = UnitChoice(),
                 lineQuantity = "",
                 lineCostPrice = "",
@@ -236,7 +382,14 @@ class PurchaseReturnViewModel @Inject constructor(
         val supplier = snapshot.supplier ?: return
         val referenceNo = snapshot.referenceNo.trim()
         val lines = snapshot.draftLines.map {
-            NewPurchaseReturnLine(it.product.id, it.quantity, it.costPrice, it.reason, it.unit)
+            NewPurchaseReturnLine(
+                productId = it.product.id,
+                quantity = it.quantity,
+                costPrice = it.costPrice,
+                reason = it.reason,
+                unit = it.unit,
+                purchaseOrderItemId = it.purchaseOrderItemId,
+            )
         }
 
         // Claim atomically: getAndUpdate returns the PREVIOUS value, so exactly
@@ -269,6 +422,9 @@ class PurchaseReturnViewModel @Inject constructor(
                 referenceNo = referenceNo,
                 returnReason = snapshot.returnReason.trim(),
                 lines = lines,
+                purchaseOrderId = snapshot.purchaseOrder?.id,
+                // The journal id doubles as the portal's idempotency key.
+                clientReference = attemptId,
             )
                 .onSuccess { doc ->
                     journal.resolve(attemptId, AttemptState.CREATED, doc.id)
@@ -276,6 +432,9 @@ class PurchaseReturnViewModel @Inject constructor(
                         it.copy(
                             isSubmitting = false,
                             supplier = null,
+                            purchaseOrder = null,
+                            returnableLines = emptyList(),
+                            selectedReturnable = null,
                             referenceNo = "",
                             returnReason = "",
                             draftLines = emptyList(),

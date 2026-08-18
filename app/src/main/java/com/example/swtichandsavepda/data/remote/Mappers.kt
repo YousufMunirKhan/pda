@@ -6,8 +6,10 @@ import com.example.swtichandsavepda.data.model.PortalState
 import com.example.swtichandsavepda.data.model.ProductUnit
 import com.example.swtichandsavepda.data.model.PurchaseOrderDoc
 import com.example.swtichandsavepda.data.model.PurchaseOrderDocLine
+import com.example.swtichandsavepda.data.model.PurchaseOrderTotals
 import com.example.swtichandsavepda.data.model.PurchaseReturnDoc
 import com.example.swtichandsavepda.data.model.PurchaseReturnDocLine
+import com.example.swtichandsavepda.data.model.ReturnableLine
 import com.example.swtichandsavepda.data.model.ProductRef
 import com.example.swtichandsavepda.data.model.StockAdjustmentDoc
 import com.example.swtichandsavepda.data.model.StockLocationRef
@@ -19,6 +21,7 @@ import com.example.swtichandsavepda.data.remote.dto.ProductRefDto
 import com.example.swtichandsavepda.data.remote.dto.ProductUnitDto
 import com.example.swtichandsavepda.data.remote.dto.PurchaseOrderDto
 import com.example.swtichandsavepda.data.remote.dto.PurchaseReturnDto
+import com.example.swtichandsavepda.data.remote.dto.ReturnableLineDto
 import com.example.swtichandsavepda.data.remote.dto.StockAdjustmentDto
 import com.example.swtichandsavepda.data.remote.dto.StockLocationRefDto
 import com.example.swtichandsavepda.data.remote.dto.SupplierRefDto
@@ -56,9 +59,18 @@ fun PurchaseOrderDto.toDomain(): PurchaseOrderDoc = PurchaseOrderDoc(
             quantityReceived = line.quantityReceived,
             unitCost = line.unitCost ?: 0.0,
             selectedUnitCode = line.selectedUnitCode,
+            quantityReturned = line.quantityReturned,
+            reportedRemaining = line.quantityRemaining,
         )
     },
     createdAtEpochMs = parsePortalInstantMs(createdAt),
+    clientReference = clientReference,
+    portalTotals = PurchaseOrderTotals(
+        ordered = totalOrdered,
+        received = totalReceived,
+        returned = totalReturned,
+        remaining = totalRemaining,
+    ).takeIf { totalOrdered != null || totalReceived != null || totalRemaining != null },
 )
 
 fun PurchaseReturnDto.toDomain(): PurchaseReturnDoc = PurchaseReturnDoc(
@@ -81,6 +93,23 @@ fun PurchaseReturnDto.toDomain(): PurchaseReturnDoc = PurchaseReturnDoc(
         )
     },
     createdAtEpochMs = parsePortalInstantMs(createdAt),
+    clientReference = clientReference,
+    purchaseOrderId = purchaseOrderId,
+    purchaseOrderReference = purchaseOrderReference,
+)
+
+fun ReturnableLineDto.toDomain(): ReturnableLine = ReturnableLine(
+    purchaseOrderItemId = purchaseOrderItemId,
+    productId = productId,
+    productName = productName ?: "Product #$productId",
+    unitCost = unitCost ?: 0.0,
+    selectedUnitCode = selectedUnitCode,
+    quantityReceived = quantityReceived ?: 0.0,
+    quantityReturned = quantityReturned ?: 0.0,
+    // Floored at zero, and never wider than received − returned: a portal that
+    // over-reports must not widen what the operator is offered.
+    quantityReturnable = (quantityReturnable ?: 0.0)
+        .coerceIn(0.0, ((quantityReceived ?: 0.0) - (quantityReturned ?: 0.0)).coerceAtLeast(0.0)),
 )
 
 fun ProductRefDto.toDomain(): ProductRef = ProductRef(
@@ -169,6 +198,7 @@ fun StockAdjustmentDto.toDomain(): StockAdjustmentDoc = StockAdjustmentDoc(
     enteredQuantity = enteredQuantity,
     selectedUnitCode = selectedUnitCode,
     createdAtEpochMs = parsePortalInstantMs(createdAt),
+    clientReference = clientReference,
 )
 
 /**

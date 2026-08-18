@@ -196,7 +196,9 @@ class UploadStockViewModel @Inject constructor(
             // portal without a local record that we tried.
             journal.begin(attemptId, DOCUMENT_TYPE, summary, System.currentTimeMillis())
 
-            repository.create(adjustment)
+            // The journal id doubles as the portal's idempotency key, so a local
+            // record and the document it produced share one handle.
+            repository.create(adjustment, clientReference = attemptId)
                 .onSuccess { doc ->
                     journal.resolve(attemptId, AttemptState.CREATED, doc.id)
                     _uiState.value = UploadStockUiState(

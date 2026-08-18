@@ -51,6 +51,7 @@ import com.example.swtichandsavepda.presentation.components.BrandCard
 import com.example.swtichandsavepda.presentation.components.BrandScaffold
 import com.example.swtichandsavepda.presentation.components.FormField
 import com.example.swtichandsavepda.presentation.components.ReferenceOption
+import com.example.swtichandsavepda.presentation.components.ReceiveSheet
 import com.example.swtichandsavepda.presentation.components.ReferencePickerField
 import com.example.swtichandsavepda.presentation.components.SectionTitle
 import com.example.swtichandsavepda.presentation.components.StatusCapsule
@@ -86,7 +87,12 @@ fun PurchaseOrderScreen(
     onRemoveLine: (Int) -> Unit,
     onSubmit: () -> Unit,
     onScanProduct: () -> Unit,
-    onReceive: (Long) -> Unit,
+    onStartReceive: (Long) -> Unit,
+    onReceiveQuantityChange: (Int, String) -> Unit,
+    onReceiveDeliveryNoteChange: (String) -> Unit,
+    onFillReceiveRemaining: () -> Unit,
+    onConfirmReceive: () -> Unit,
+    onCancelReceive: () -> Unit,
     onCancelOrder: (Long) -> Unit,
     onRefresh: () -> Unit,
     onDismissMessages: () -> Unit,
@@ -163,12 +169,23 @@ fun PurchaseOrderScreen(
                     OrderRow(
                         order = order,
                         isBusy = uiState.busyOrderId == order.id,
-                        onReceive = { onReceive(order.id) },
+                        onReceive = { onStartReceive(order.id) },
                         onCancel = { onCancelOrder(order.id) },
                     )
                 }
             }
         }
+    }
+
+    uiState.receiveDraft?.let { draft ->
+        ReceiveSheet(
+            draft = draft,
+            onQuantityChange = onReceiveQuantityChange,
+            onDeliveryNoteChange = onReceiveDeliveryNoteChange,
+            onFillRemaining = onFillReceiveRemaining,
+            onConfirm = onConfirmReceive,
+            onDismiss = onCancelReceive,
+        )
     }
 }
 
@@ -399,11 +416,13 @@ private fun OrderRow(
     onReceive: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val status = order.status.orEmpty()
-    val isReceived = status.contains("receiv", ignoreCase = true)
-    val isCancelled = status.contains("cancel", ignoreCase = true)
-    val ordered = order.lines.sumOf { it.quantityOrdered }
-    val received = order.lines.sumOf { it.quantityReceived ?: 0.0 }
+    // Derived from the line quantities, never from the status string: a
+    // partially-received PO reports a status containing "receiv", which under
+    // the old string match hid the Receive button and closed the PO for good.
+    val ordered = order.orderedTotal
+    val received = order.receivedTotal
+    val remaining = order.remainingTotal
+    val returned = order.lines.sumOf { it.quantityReturned ?: 0.0 }
 
     BrandCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -428,13 +447,19 @@ private fun OrderRow(
                 OrderStatusChip(status = order.status)
             }
 
-            // Received progress (what "Receive" updates).
-            if (isReceived || received > 0) {
+            // Ordered / Received / Returned / Remaining, so a part-delivered PO
+            // reads at a glance without opening it.
+            if (received > 0 || returned > 0) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Received ${UomMath.pretty(received)} of ${UomMath.pretty(ordered)} units",
+                    text = buildString {
+                        append("Ordered ${UomMath.pretty(ordered)}")
+                        append(" · received ${UomMath.pretty(received)}")
+                        if (returned > 0) append(" · returned ${UomMath.pretty(returned)}")
+                        append(" · ${UomMath.pretty(remaining)} outstanding")
+                    },
                     style = MaterialTheme.typography.bodySmall,
-                    color = StatusSuccess,
+                    color = if (order.isFullyReceived) StatusSuccess else MaterialTheme.colorScheme.primary,
                 )
             }
 
@@ -459,8 +484,9 @@ private fun OrderRow(
                 )
             }
 
-            // Actions only while the PO is still open (not received / cancelled).
-            if (!isReceived && !isCancelled) {
+            // Actions while anything is still outstanding. A partially-received
+            // PO stays receivable — that is the whole point of partial receipts.
+            if (order.canReceive) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                     modifier = Modifier.fillMaxWidth(),
@@ -473,7 +499,9 @@ private fun OrderRow(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
-                    TextButton(onClick = onReceive, enabled = !isBusy) { Text("Receive") }
+                    TextButton(onClick = onReceive, enabled = !isBusy) {
+                        Text(if (received > 0) "Receive more" else "Receive")
+                    }
                     TextButton(onClick = onCancel, enabled = !isBusy) {
                         Text("Cancel", color = StatusDanger)
                     }

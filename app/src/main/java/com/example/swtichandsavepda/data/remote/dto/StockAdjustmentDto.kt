@@ -19,6 +19,12 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class StockAdjustmentRequest(
+    /**
+     * Idempotency key, unique per shop. A repeat of the same reference returns
+     * the document already created rather than a second one, which turns an
+     * ambiguous write into an exact lookup instead of a heuristic match.
+     */
+    val clientReference: String? = null,
     val productId: Long,
     val adjustmentType: String,
     val direction: String,
@@ -66,6 +72,8 @@ data class StockAdjustmentDto(
     val status: String? = null,
     val portalState: String? = null,
     val rejectReason: String? = null,
+    /** Echo of the idempotency key we sent — the exact reconciliation handle. */
+    val clientReference: String? = null,
     val createdAt: String? = null,
     val updatedAt: String? = null,
     // Multi-UOM echo — present only when the draft was created with a unit.

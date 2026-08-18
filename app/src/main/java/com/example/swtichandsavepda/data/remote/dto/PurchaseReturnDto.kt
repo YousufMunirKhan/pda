@@ -7,7 +7,14 @@ import kotlinx.serialization.Serializable
 /** Body for `POST /api/pda/purchase-returns` and `PUT …/{id}`. */
 @Serializable
 data class PurchaseReturnRequest(
+    /** Idempotency key, unique per shop. See [StockAdjustmentRequest.clientReference]. */
+    val clientReference: String? = null,
     val supplierId: Long,
+    /**
+     * The PO these goods arrived on. Optional — omitted for a plain
+     * supplier-level return, which keeps working exactly as before.
+     */
+    val purchaseOrderId: Long? = null,
     val referenceNo: String,
     val returnReason: String,
     val items: List<PurchaseReturnItemRequest>,
@@ -21,6 +28,11 @@ data class PurchaseReturnRequest(
 @Serializable
 data class PurchaseReturnItemRequest(
     val productId: Long,
+    /**
+     * Which PO line is being returned. A PO can carry two lines for the same
+     * product at different costs, so product_id alone cannot identify one.
+     */
+    val purchaseOrderItemId: Long? = null,
     @Serializable(with = CompactDoubleSerializer::class)
     val quantity: Double,
     @Serializable(with = CompactDoubleSerializer::class)
@@ -43,6 +55,9 @@ data class PurchaseReturnItemRequest(
 data class PurchaseReturnDto(
     val id: Long,
     val supplierId: Long? = null,
+    val purchaseOrderId: Long? = null,
+    val purchaseOrderReference: String? = null,
+    val clientReference: String? = null,
     val supplierName: String? = null,
     val referenceNo: String? = null,
     val returnReason: String? = null,

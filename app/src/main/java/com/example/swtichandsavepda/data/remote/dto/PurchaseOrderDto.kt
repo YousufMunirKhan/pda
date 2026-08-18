@@ -45,6 +45,12 @@ data class PurchaseOrderItemRequest(
 @Serializable
 data class ReceivePurchaseOrderRequest(
     val items: List<ReceiveItemRequest>? = null,
+    /** Idempotency key, unique per shop. See [StockAdjustmentRequest.clientReference]. */
+    val clientReference: String? = null,
+    /** The supplier's delivery-note number — what identifies this GRN to a human. */
+    val referenceNo: String? = null,
+    val receivedAt: String? = null,
+    val note: String? = null,
 )
 
 @Serializable
@@ -58,6 +64,7 @@ data class ReceiveItemRequest(
 data class PurchaseOrderDto(
     val id: Long,
     val supplierId: Long? = null,
+    val clientReference: String? = null,
     val supplierName: String? = null,
     val reference: String? = null,
     val referenceNo: String? = null,
@@ -72,6 +79,16 @@ data class PurchaseOrderDto(
     @Serializable(with = FlexibleDoubleSerializer::class)
     val totalAmount: Double? = null,
     val items: List<PurchaseOrderItemDto>? = null,
+    // Portal-computed totals (API addendum §2.4). Preferred over summing lines
+    // so the portal and the app cannot disagree about the arithmetic.
+    @Serializable(with = FlexibleDoubleSerializer::class)
+    val totalOrdered: Double? = null,
+    @Serializable(with = FlexibleDoubleSerializer::class)
+    val totalReceived: Double? = null,
+    @Serializable(with = FlexibleDoubleSerializer::class)
+    val totalReturned: Double? = null,
+    @Serializable(with = FlexibleDoubleSerializer::class)
+    val totalRemaining: Double? = null,
     val createdAt: String? = null,
     val updatedAt: String? = null,
 )
@@ -90,6 +107,15 @@ data class PurchaseOrderItemDto(
     val unitCost: Double? = null,
     @Serializable(with = FlexibleDoubleSerializer::class)
     val lineTotal: Double? = null,
+    /**
+     * Total returned against this line. Proposed in the API addendum (§2.4);
+     * absent today, which reads as "no returns recorded".
+     */
+    @Serializable(with = FlexibleDoubleSerializer::class)
+    val quantityReturned: Double? = null,
+    /** Portal-computed ordered − received. Preferred over deriving it locally. */
+    @Serializable(with = FlexibleDoubleSerializer::class)
+    val quantityRemaining: Double? = null,
     // Multi-UOM echo — present only when the line was created with a unit.
     val selectedUnitCode: String? = null,
     @Serializable(with = FlexibleDoubleSerializer::class)

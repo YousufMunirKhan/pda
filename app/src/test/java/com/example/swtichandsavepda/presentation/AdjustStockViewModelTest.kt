@@ -46,9 +46,15 @@ class AdjustStockViewModelTest {
         var lastCreated: NewStockAdjustment? = null
         var createCallCount = 0
 
-        override suspend fun create(adjustment: NewStockAdjustment): Result<StockAdjustmentDoc> {
+        var lastClientReference: String? = null
+
+        override suspend fun create(
+            adjustment: NewStockAdjustment,
+            clientReference: String?,
+        ): Result<StockAdjustmentDoc> {
             createCallCount++
             lastCreated = adjustment
+            lastClientReference = clientReference
             gate?.await()
             return createResult
         }
@@ -355,6 +361,25 @@ class AdjustStockViewModelTest {
         // Nothing was created, so the entered values stay put.
         assertEquals("2", state.quantity)
         assertEquals(AttemptState.NOT_CREATED, journal.rows.single().state)
+    }
+
+    @Test
+    fun `the write carries an idempotency key, and the journal shares it`() = runTest {
+        // One handle ties the local journal row to the portal document, so an
+        // ambiguous write resolves by exact lookup instead of guesswork.
+        val repository = FakeAdjustmentRepository()
+        val journal = FakeJournal()
+        val viewModel = viewModel(repository, journal = journal)
+
+        viewModel.selectProduct(product(55))
+        advanceUntilIdle()
+        viewModel.setQuantity("2")
+        viewModel.selectSourceLocation(location(1))
+        viewModel.submit()
+        advanceUntilIdle()
+
+        val sentKey = requireNotNull(repository.lastClientReference)
+        assertEquals(sentKey, journal.rows.single().id)
     }
 
     @Test

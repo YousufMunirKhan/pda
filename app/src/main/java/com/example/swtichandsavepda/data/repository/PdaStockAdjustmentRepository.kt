@@ -18,7 +18,15 @@ import javax.inject.Singleton
 /** Stock adjustments on the PDA portal — one call, all five modes. */
 interface PdaStockAdjustmentRepository {
 
-    suspend fun create(adjustment: NewStockAdjustment): Result<StockAdjustmentDoc>
+    /**
+     * [clientReference] is the idempotency key. The portal returns the existing
+     * document if it sees the same one twice, so an ambiguous write resolves by
+     * exact lookup instead of matching on product and quantity.
+     */
+    suspend fun create(
+        adjustment: NewStockAdjustment,
+        clientReference: String? = null,
+    ): Result<StockAdjustmentDoc>
 
     suspend fun edit(id: Long, adjustment: NewStockAdjustment): Result<StockAdjustmentDoc>
 
@@ -37,13 +45,18 @@ class PdaStockAdjustmentRepositoryImpl @Inject constructor(
      * outcome is resolved by asking the portal what it holds — never by
      * re-sending. See [resolveIfAmbiguous].
      */
-    override suspend fun create(adjustment: NewStockAdjustment): Result<StockAdjustmentDoc> {
+    override suspend fun create(
+        adjustment: NewStockAdjustment,
+        clientReference: String?,
+    ): Result<StockAdjustmentDoc> {
         val attempt = WriteAttempt()
-        return safeWriteCall(attempt) { api.createStockAdjustment(adjustment.toRequest(), attempt) }
+        return safeWriteCall(attempt) {
+            api.createStockAdjustment(adjustment.toRequest(clientReference), attempt)
+        }
             .mapDocument(attempt, StockAdjustmentDto::toDomain)
             .resolveIfAmbiguous(
                 list = ::list,
-                matches = adjustment.matcher(attempt.startedAtEpochMs),
+                matches = adjustment.matcher(attempt.startedAtEpochMs, clientReference),
             )
     }
 
@@ -81,12 +94,18 @@ class PdaStockAdjustmentRepositoryImpl @Inject constructor(
  */
 internal fun NewStockAdjustment.matcher(
     attemptStartedAtEpochMs: Long,
+    clientReference: String? = null,
 ): (StockAdjustmentDoc) -> Boolean = { doc ->
-    val expectedBase = UomMath.baseQuantity(quantity, unit?.conversionToBase ?: 1.0)
-    doc.productId == productId &&
-        doc.adjustmentType == mode.adjustmentType &&
-        doc.direction == mode.direction &&
-        doc.quantity.isCloseTo(expectedBase) &&
-        // A document created before we started cannot be ours.
-        (doc.createdAtEpochMs?.let { it >= attemptStartedAtEpochMs - CLOCK_SKEW_MS } ?: false)
+    if (clientReference != null) {
+        // Exact: the portal echoes the key we sent, so there is nothing to guess.
+        doc.clientReference == clientReference
+    } else {
+        val expectedBase = UomMath.baseQuantity(quantity, unit?.conversionToBase ?: 1.0)
+        doc.productId == productId &&
+            doc.adjustmentType == mode.adjustmentType &&
+            doc.direction == mode.direction &&
+            doc.quantity.isCloseTo(expectedBase) &&
+            // A document created before we started cannot be ours.
+            (doc.createdAtEpochMs?.let { it >= attemptStartedAtEpochMs - CLOCK_SKEW_MS } ?: false)
+    }
 }

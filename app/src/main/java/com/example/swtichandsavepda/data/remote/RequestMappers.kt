@@ -37,6 +37,7 @@ internal fun NewPurchaseOrderLine.toRequest() = PurchaseOrderItemRequest(
 /** Same contract as a PO line, but the base quantity key is `base_quantity`. */
 internal fun NewPurchaseReturnLine.toRequest() = PurchaseReturnItemRequest(
     productId = productId,
+    purchaseOrderItemId = purchaseOrderItemId,
     quantity = quantity,
     costPrice = costPrice,
     reason = reason,
@@ -55,12 +56,13 @@ internal fun NewPurchaseReturnLine.toRequest() = PurchaseReturnItemRequest(
  * `unit_cost` are the **base** values the POS books, and the operator's own entry
  * is carried separately in `entered_quantity` / `entered_unit_cost`.
  */
-internal fun NewStockAdjustment.toRequest(): StockAdjustmentRequest {
+internal fun NewStockAdjustment.toRequest(clientReference: String? = null): StockAdjustmentRequest {
     val conversion = unit?.conversionToBase ?: 1.0
     val baseQuantity = UomMath.baseQuantity(quantity, conversion)
     val baseUnitCost = unitCost?.let { UomMath.baseUnitCost(it, conversion) }
 
     return StockAdjustmentRequest(
+        clientReference = clientReference,
         productId = productId,
         adjustmentType = mode.adjustmentType,
         direction = mode.direction,

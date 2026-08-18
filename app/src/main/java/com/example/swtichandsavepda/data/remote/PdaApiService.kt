@@ -93,6 +93,18 @@ interface PdaApiService {
     @GET("api/pda/purchase-orders")
     suspend fun listPurchaseOrders(): JsonElement
 
+    /** Receiving history for one PO — one row per GRN, newest first. */
+    @GET("api/pda/purchase-orders/{id}/receipts")
+    suspend fun purchaseOrderReceipts(@Path("id") id: Long): JsonElement
+
+    /**
+     * What can still be returned against a PO: received minus already returned,
+     * per line. The portal is the authority on this, so the app never computes
+     * it from two other calls.
+     */
+    @GET("api/pda/purchase-orders/{id}/returnable")
+    suspend fun purchaseOrderReturnable(@Path("id") id: Long): JsonElement
+
     @POST("api/pda/purchase-orders/{id}/cancel")
     suspend fun cancelPurchaseOrder(
         @Path("id") id: Long,
@@ -107,7 +119,9 @@ interface PdaApiService {
     ): DocumentEnvelope<PurchaseReturnDto>
 
     @GET("api/pda/purchase-returns")
-    suspend fun listPurchaseReturns(): JsonElement
+    suspend fun listPurchaseReturns(
+        @Query("purchase_order_id") purchaseOrderId: Long? = null,
+    ): JsonElement
 
     @PUT("api/pda/purchase-returns/{id}")
     suspend fun updatePurchaseReturn(

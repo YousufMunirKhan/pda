@@ -35,12 +35,15 @@ import androidx.compose.ui.unit.dp
 import com.example.swtichandsavepda.data.model.PortalState
 import com.example.swtichandsavepda.data.model.ProductUnit
 import com.example.swtichandsavepda.data.model.PurchaseReturnDoc
+import com.example.swtichandsavepda.data.model.ReturnableLine
+import com.example.swtichandsavepda.data.model.UomMath
 import com.example.swtichandsavepda.presentation.components.BrandCard
 import com.example.swtichandsavepda.presentation.components.BrandScaffold
 import com.example.swtichandsavepda.presentation.components.FormField
 import com.example.swtichandsavepda.presentation.components.PortalStateChip
 import com.example.swtichandsavepda.presentation.components.ReferenceOption
 import com.example.swtichandsavepda.presentation.components.ReferencePickerField
+import com.example.swtichandsavepda.presentation.components.ReturnableLinePicker
 import com.example.swtichandsavepda.presentation.components.SectionTitle
 import com.example.swtichandsavepda.presentation.components.SubmitOutcomeBanner
 import com.example.swtichandsavepda.presentation.components.UnitSection
@@ -50,6 +53,10 @@ import com.example.swtichandsavepda.ui.theme.brandColors
 @Composable
 fun PurchaseReturnScreen(
     uiState: PurchaseReturnUiState,
+    onSearchPurchaseOrders: suspend (String) -> Result<List<ReferenceOption>>,
+    onSelectPurchaseOrder: (ReferenceOption) -> Unit,
+    onClearPurchaseOrder: () -> Unit,
+    onSelectReturnableLine: (ReturnableLine) -> Unit,
     onSearchSuppliers: suspend (String) -> Result<List<ReferenceOption>>,
     onSelectSupplier: (ReferenceOption) -> Unit,
     onReferenceChange: (String) -> Unit,
@@ -103,6 +110,10 @@ fun PurchaseReturnScreen(
 
             CreateReturnCard(
                 uiState = uiState,
+                onSearchPurchaseOrders = onSearchPurchaseOrders,
+                onSelectPurchaseOrder = onSelectPurchaseOrder,
+                onClearPurchaseOrder = onClearPurchaseOrder,
+                onSelectReturnableLine = onSelectReturnableLine,
                 onSearchSuppliers = onSearchSuppliers,
                 onSelectSupplier = onSelectSupplier,
                 onReferenceChange = onReferenceChange,
@@ -154,6 +165,10 @@ fun PurchaseReturnScreen(
 @Composable
 private fun CreateReturnCard(
     uiState: PurchaseReturnUiState,
+    onSearchPurchaseOrders: suspend (String) -> Result<List<ReferenceOption>>,
+    onSelectPurchaseOrder: (ReferenceOption) -> Unit,
+    onClearPurchaseOrder: () -> Unit,
+    onSelectReturnableLine: (ReturnableLine) -> Unit,
     onSearchSuppliers: suspend (String) -> Result<List<ReferenceOption>>,
     onSelectSupplier: (ReferenceOption) -> Unit,
     onReferenceChange: (String) -> Unit,
@@ -179,12 +194,42 @@ private fun CreateReturnCard(
         ) {
             SectionTitle(text = "New purchase return")
 
+            // Optional. Linking to a PO limits the return to what that delivery
+            // actually brought in; leaving it empty is the plain supplier-level
+            // return that existed before.
+            ReferencePickerField(
+                label = "Against purchase order (optional)",
+                selected = uiState.purchaseOrder?.let {
+                    ReferenceOption(id = it.id, title = it.reference)
+                },
+                onSearch = onSearchPurchaseOrders,
+                onSelected = onSelectPurchaseOrder,
+                enabled = !uiState.isSubmitting,
+                placeholder = "Tap to search received orders",
+            )
+
+            if (uiState.isAgainstPurchaseOrder) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(
+                        onClick = onClearPurchaseOrder,
+                        enabled = !uiState.isSubmitting,
+                    ) {
+                        Text("Not against an order")
+                    }
+                }
+            }
+
             ReferencePickerField(
                 label = "Supplier",
                 selected = uiState.supplier,
                 onSearch = onSearchSuppliers,
                 onSelected = onSelectSupplier,
-                enabled = !uiState.isSubmitting,
+                // Taken from the PO when linked: the portal rejects a return
+                // whose supplier differs from the order's.
+                enabled = !uiState.isSubmitting && !uiState.isAgainstPurchaseOrder,
                 isError = uiState.fieldErrors.containsKey("supplier_id"),
                 placeholder = "Tap to search suppliers",
             )
@@ -204,27 +249,53 @@ private fun CreateReturnCard(
             )
 
             SectionTitle(text = "Add a line")
-            ReferencePickerField(
-                label = "Product",
-                selected = uiState.lineProduct,
-                onSearch = onSearchProducts,
-                onSelected = onSelectLineProduct,
-                enabled = !uiState.isSubmitting,
-                placeholder = "Search name, code or barcode",
-                onScanRequested = onScanProduct,
-            )
-            UnitSection(
-                choice = uiState.lineUnitChoice,
-                onSelect = onSelectLineUnit,
-                onRetry = onRetryLineUnits,
-                enabled = !uiState.isSubmitting,
-            )
+
+            if (uiState.isAgainstPurchaseOrder) {
+                ReturnableLinePicker(
+                    lines = uiState.returnableLines,
+                    selected = uiState.selectedReturnable,
+                    isLoading = uiState.isLoadingReturnable,
+                    error = uiState.returnableError,
+                    onSelect = onSelectReturnableLine,
+                    onRetry = {
+                        uiState.purchaseOrder?.let {
+                            onSelectPurchaseOrder(ReferenceOption(id = it.id, title = it.reference))
+                        }
+                    },
+                    enabled = !uiState.isSubmitting,
+                )
+            } else {
+                ReferencePickerField(
+                    label = "Product",
+                    selected = uiState.lineProduct,
+                    onSearch = onSearchProducts,
+                    onSelected = onSelectLineProduct,
+                    enabled = !uiState.isSubmitting,
+                    placeholder = "Search name, code or barcode",
+                    onScanRequested = onScanProduct,
+                )
+            }
+            if (!uiState.isAgainstPurchaseOrder) {
+                // A PO line already fixes the unit the goods came in on, so there
+                // is nothing for the operator to choose.
+                UnitSection(
+                    choice = uiState.lineUnitChoice,
+                    onSelect = onSelectLineUnit,
+                    onRetry = onRetryLineUnits,
+                    enabled = !uiState.isSubmitting,
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FormField(
                     value = uiState.lineQuantity,
                     onValueChange = onLineQuantityChange,
                     label = "Qty",
-                    helper = uiState.lineBaseQuantityHint,
+                    isError = uiState.lineExceedsReturnable,
+                    helper = if (uiState.lineExceedsReturnable) {
+                        "Only ${UomMath.pretty(uiState.selectedReturnableRemaining)} left to return."
+                    } else {
+                        uiState.lineBaseQuantityHint
+                    },
                     keyboardType = if (uiState.lineUnitChoice.quantityDecimals > 0) {
                         KeyboardType.Decimal
                     } else {

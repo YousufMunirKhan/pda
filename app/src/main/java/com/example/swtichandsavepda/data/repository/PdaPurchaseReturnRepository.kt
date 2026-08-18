@@ -18,11 +18,17 @@ import javax.inject.Singleton
 /** Purchase returns on the PDA portal — create, list, edit, cancel. */
 interface PdaPurchaseReturnRepository {
 
+    /**
+     * [purchaseOrderId] links the return to the PO the goods arrived on; omit it
+     * for a plain supplier-level return. [clientReference] is the idempotency key.
+     */
     suspend fun create(
         supplierId: Long,
         referenceNo: String,
         returnReason: String,
         lines: List<NewPurchaseReturnLine>,
+        purchaseOrderId: Long? = null,
+        clientReference: String? = null,
     ): Result<PurchaseReturnDoc>
 
     suspend fun edit(
@@ -44,31 +50,50 @@ class PdaPurchaseReturnRepositoryImpl @Inject constructor(
 ) : PdaPurchaseReturnRepository {
 
     /**
-     * Returns are the one document type with a real business key: the operator
-     * supplies `reference_no`, so an ambiguous create reconciles by exact match
-     * rather than by heuristic.
+     * An ambiguous create reconciles on [clientReference], which the portal
+     * guarantees unique per shop.
      *
-     * NEEDS VERIFICATION: ask the portal team to make `reference_no` unique per
-     * shop and 422 on collision. That single constraint makes this create
-     * genuinely idempotent and removes the need for reconciliation here at all.
+     * It deliberately does **not** match on `reference_no`. The portal team
+     * confirmed that field is free text and not unique, so matching on it could
+     * recognise somebody else's return as this one and silently drop a real
+     * stock movement.
      */
     override suspend fun create(
         supplierId: Long,
         referenceNo: String,
         returnReason: String,
         lines: List<NewPurchaseReturnLine>,
+        purchaseOrderId: Long?,
+        clientReference: String?,
     ): Result<PurchaseReturnDoc> {
         val attempt = WriteAttempt()
         return safeWriteCall(attempt) {
             api.createPurchaseReturn(
-                buildRequest(supplierId, referenceNo, returnReason, lines),
+                buildRequest(
+                    supplierId = supplierId,
+                    referenceNo = referenceNo,
+                    returnReason = returnReason,
+                    lines = lines,
+                    purchaseOrderId = purchaseOrderId,
+                    clientReference = clientReference,
+                ),
                 attempt,
             )
         }.mapDocument(attempt, PurchaseReturnDto::toDomain)
-            .resolveIfAmbiguous(
-                list = ::list,
-                matches = { doc -> doc.referenceNo.equals(referenceNo, ignoreCase = true) },
-            )
+            .let { result ->
+                // With no key there is nothing to match on, and a matcher that
+                // never matches would resolve to "not created — safe to try
+                // again", which is the one conclusion we must not reach from
+                // ignorance. Leave it ambiguous instead.
+                if (clientReference == null) {
+                    result
+                } else {
+                    result.resolveIfAmbiguous(
+                        list = ::list,
+                        matches = { doc -> doc.clientReference == clientReference },
+                    )
+                }
+            }
     }
 
     override suspend fun edit(
@@ -103,8 +128,12 @@ class PdaPurchaseReturnRepositoryImpl @Inject constructor(
         referenceNo: String,
         returnReason: String,
         lines: List<NewPurchaseReturnLine>,
+        purchaseOrderId: Long? = null,
+        clientReference: String? = null,
     ) = PurchaseReturnRequest(
+        clientReference = clientReference,
         supplierId = supplierId,
+        purchaseOrderId = purchaseOrderId,
         referenceNo = referenceNo,
         returnReason = returnReason,
         items = lines.map { it.toRequest() },

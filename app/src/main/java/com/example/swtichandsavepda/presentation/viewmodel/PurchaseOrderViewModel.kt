@@ -13,6 +13,7 @@ import com.example.swtichandsavepda.data.remote.PdaApiException
 import com.example.swtichandsavepda.data.repository.PdaPurchaseOrderRepository
 import com.example.swtichandsavepda.data.repository.PdaReferenceRepository
 import com.example.swtichandsavepda.di.WriteScope
+import com.example.swtichandsavepda.presentation.ReceiveDraft
 import com.example.swtichandsavepda.presentation.SubmitOutcome
 import com.example.swtichandsavepda.presentation.UnitChoice
 import com.example.swtichandsavepda.presentation.components.ReferenceOption
@@ -61,6 +62,8 @@ data class PurchaseOrderUiState(
     val isSubmitting: Boolean = false,
     // Existing orders
     val orders: List<PurchaseOrderDoc> = emptyList(),
+    /** The goods-in currently being entered, or null when the sheet is closed. */
+    val receiveDraft: ReceiveDraft? = null,
     val isLoading: Boolean = false,
     val busyOrderId: Long? = null,
     // Messaging
@@ -295,7 +298,118 @@ class PurchaseOrderViewModel @Inject constructor(
         }
     }
 
-    fun receive(orderId: Long) = mutateOrder(orderId, "received") { repository.receive(orderId) }
+    // ── Receiving ───────────────────────────────────────────────────────────
+
+    /**
+     * Opens the goods-in sheet for a PO. A PO can be received more than once, so
+     * this is always about *this* delivery, never the whole order.
+     */
+    fun startReceive(orderId: Long) {
+        val order = _uiState.value.orders.firstOrNull { it.id == orderId } ?: return
+        if (!order.canReceive) return
+        _uiState.update { it.copy(receiveDraft = ReceiveDraft.of(order), outcome = null) }
+    }
+
+    fun setReceiveQuantity(index: Int, text: String) {
+        _uiState.update { state ->
+            val draft = state.receiveDraft ?: return@update state
+            val line = draft.lines.getOrNull(index) ?: return@update state
+            // Whole units unless the line's unit allows decimals; the PO carries
+            // no allow_decimal, so mirror the entered unit's own precision.
+            val decimals = if (line.remaining % 1.0 == 0.0) 0 else MAX_RECEIVE_DECIMALS
+            state.copy(receiveDraft = draft.withEntry(index, sanitizeDecimal(text, decimals)))
+        }
+    }
+
+    /** "Receive all outstanding" — the common case when a full delivery lands. */
+    fun fillReceiveRemaining() {
+        _uiState.update { state ->
+            state.copy(receiveDraft = state.receiveDraft?.fillRemaining())
+        }
+    }
+
+    fun setReceiveDeliveryNote(text: String) {
+        _uiState.update { state ->
+            state.copy(receiveDraft = state.receiveDraft?.withDeliveryNote(text))
+        }
+    }
+
+    fun cancelReceive() {
+        _uiState.update { it.copy(receiveDraft = null) }
+    }
+
+    /**
+     * Posts this delivery. The success message quotes the **portal's** returned
+     * received/ordered totals rather than the app's own arithmetic, because
+     * whether the portal adds to or replaces `quantity_received` is unconfirmed
+     * (API addendum §2.1) — so the operator is shown what the portal actually
+     * recorded, whichever way it behaves.
+     */
+    fun confirmReceive() {
+        val draft = _uiState.value.receiveDraft ?: return
+        if (!draft.canSubmit) return
+        val orderId = draft.order.id
+        val quantities = draft.receivedByProduct()
+        val deliveryNote = draft.deliveryNote.trim().ifBlank { null }
+        val attemptId = newAttemptId()
+        val summary = "Receive " + UomMath.pretty(draft.enteredTotal) +
+            " · " + draft.order.reference
+
+        val claimed = _uiState.getAndUpdate { state ->
+            if (state.busyOrderId == null) {
+                state.copy(busyOrderId = orderId, receiveDraft = null, outcome = null)
+            } else {
+                state
+            }
+        }
+        if (claimed.busyOrderId != null) return
+
+        writeScope.launch {
+            // Journalled before the request, and the same id doubles as the
+            // portal's idempotency key: a receive is a delta the portal
+            // accumulates, so an unguarded retry books the delivery twice.
+            journal.begin(attemptId, DOCUMENT_TYPE_RECEIPT, summary, System.currentTimeMillis())
+
+            repository.receive(
+                id = orderId,
+                receivedByProduct = quantities,
+                referenceNo = deliveryNote,
+                clientReference = attemptId,
+            )
+                .onSuccess { doc ->
+                    journal.resolve(attemptId, AttemptState.CREATED, doc.id)
+                    _uiState.update {
+                        it.copy(
+                            busyOrderId = null,
+                            outcome = SubmitOutcome.Created(
+                                "PO ${doc.reference} — ${UomMath.pretty(doc.receivedTotal)} of " +
+                                    "${UomMath.pretty(doc.orderedTotal)} received, " +
+                                    "${UomMath.pretty(doc.remainingTotal)} outstanding.",
+                            ),
+                        )
+                    }
+                    loadOrders()
+                }
+                .onFailure { throwable ->
+                    journal.resolve(
+                        attemptId,
+                        if (throwable is PdaApiException.Ambiguous) {
+                            AttemptState.UNKNOWN
+                        } else {
+                            AttemptState.NOT_CREATED
+                        },
+                    )
+                    _uiState.update { it.copy(busyOrderId = null).applyFailure(throwable) }
+                    // A receive that may or may not have landed must be checked
+                    // against the portal before anyone receives again. OVER_RECEIPT
+                    // and PO_CANCELLED mean the same thing for a different reason:
+                    // somebody else moved this PO while the sheet was open, so the
+                    // quantities on screen are stale.
+                    val stale = (throwable as? PdaApiException.Validation)?.isStaleData == true
+                    if (throwable is PdaApiException.Ambiguous || stale) loadOrders()
+                }
+        }
+    }
 
     fun cancelOrder(orderId: Long) = mutateOrder(orderId, "cancelled") { repository.cancel(orderId) }
 
@@ -374,5 +488,11 @@ class PurchaseOrderViewModel @Inject constructor(
 
     private companion object {
         const val DOCUMENT_TYPE = "purchase_order"
+
+        /** Receipts journal under their own type so the menu can name them. */
+        const val DOCUMENT_TYPE_RECEIPT = "purchase_order_receipt"
+
+        /** Decimal places allowed when a line's outstanding quantity is fractional. */
+        const val MAX_RECEIVE_DECIMALS = 4
     }
 }

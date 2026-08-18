@@ -24,6 +24,12 @@ data class NewPurchaseReturnLine(
     val costPrice: Double,
     val reason: String,
     val unit: ProductUnit? = null,
+    /**
+     * The PO line these goods arrived on, when the return is raised against a
+     * purchase order. A PO can carry two lines for the same product at different
+     * costs, so the product id alone cannot say which is being returned.
+     */
+    val purchaseOrderItemId: Long? = null,
 )
 
 /**

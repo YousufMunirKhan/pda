@@ -18,11 +18,26 @@ sealed class PdaApiException(message: String, cause: Throwable? = null) :
     /** 404 — the document is not on this shop (or was removed). */
     class NotFound(message: String) : PdaApiException(message)
 
-    /** 422 — soft validation failed; [fieldErrors] maps field → messages. */
+    /**
+     * 422 — soft validation failed; [fieldErrors] maps field → messages.
+     *
+     * [code] is the portal's machine-readable reason where it sends one. It
+     * matters because the four receive codes need different handling:
+     * `OVER_RECEIPT` and `PO_CANCELLED` mean this device's cached quantities are
+     * stale and the PO should be reloaded, whereas `PRODUCT_NOT_ON_PO` and
+     * `NEGATIVE_QUANTITY` are client bugs. Substring-matching English prose to
+     * tell them apart would be neither reliable nor translatable.
+     */
     class Validation(
         message: String,
         val fieldErrors: Map<String, List<String>> = emptyMap(),
-    ) : PdaApiException(message)
+        val code: String? = null,
+    ) : PdaApiException(message) {
+
+        /** The portal's quantities have moved on; reload before re-entering. */
+        val isStaleData: Boolean
+            get() = code == "OVER_RECEIPT" || code == "PO_CANCELLED"
+    }
 
     /** 5xx — the portal errored. */
     class Server(message: String) : PdaApiException(message)
