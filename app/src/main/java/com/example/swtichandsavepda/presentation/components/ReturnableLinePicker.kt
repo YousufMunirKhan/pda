@@ -9,10 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -22,7 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.swtichandsavepda.data.model.ReturnableLine
-import com.example.swtichandsavepda.ui.theme.WellOrangeFg
 import com.example.swtichandsavepda.ui.theme.brandColors
 
 /**
@@ -76,11 +72,11 @@ fun ReturnableLinePicker(
             )
 
             else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // The portal counts only portal- and PDA-created returns, so a
-                // return raised on the POS is invisible to these figures. Say so
-                // rather than presenting the limit as authoritative.
-                ReturnableCaveat()
-
+                // Each row still shows received and already-returned beside the
+                // limit. The portal now recomputes quantity_returned from every
+                // non-cancelled return, till-raised ones included, so the limit is
+                // trustworthy — but the figures behind it are what let an operator
+                // sanity-check a number before sending goods back.
                 lines.forEach { line ->
                     ReturnableRow(
                         line = line,
@@ -92,30 +88,6 @@ fun ReturnableLinePicker(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ReturnableCaveat() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 2.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Icon(
-            imageVector = Icons.Default.ErrorOutline,
-            contentDescription = null,
-            tint = WellOrangeFg,
-            modifier = Modifier.width(14.dp).height(14.dp),
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = "Returns raised on the till are not counted here yet — check the " +
-                "figures if you know one has been done.",
-            style = MaterialTheme.typography.bodySmall,
-            color = WellOrangeFg,
-        )
     }
 }
 

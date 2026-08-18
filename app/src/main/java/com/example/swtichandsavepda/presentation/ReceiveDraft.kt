@@ -48,11 +48,18 @@ data class ReceiveDraftLine(
  * only: each line's [ReceiveDraftLine.entered] is what physically turned up now,
  * never a running total.
  *
- * **Assumption, stated deliberately:** `quantity_received` in the receive body
- * is a delta the portal adds to what it already holds. That is what the PDA
- * sends. It is unconfirmed — see the API addendum §2.1 — so after a receipt the
- * app reports the portal's own returned totals rather than its own arithmetic,
- * and the operator sees the truth either way.
+ * **Two contracts, both confirmed by the portal team:**
+ *
+ * 1. `quantity_received` is a **delta** the portal adds to its running total, not
+ *    a cumulative figure.
+ * 2. It is in the line's **selected unit**, not base units — a "5 BOX" line
+ *    receiving 2 boxes sends `2`, not `24`. The portal derives base from the PO
+ *    line's own conversion.
+ *
+ * Both are load-bearing. Send cumulative totals and every delivery after the
+ * first overwrites its predecessor; send base units and a Box line books short
+ * by the conversion factor. After a receipt the app still reports the portal's
+ * own totals rather than its own arithmetic, so any drift surfaces immediately.
  */
 data class ReceiveDraft(
     val order: PurchaseOrderDoc,

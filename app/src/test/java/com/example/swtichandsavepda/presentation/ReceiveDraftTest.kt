@@ -189,6 +189,28 @@ class ReceiveDraftTest {
     }
 
     @Test
+    fun `receive sends SELECTED-unit quantities, never base`() {
+        // Confirmed contract: a "5 BOX" line receiving 2 boxes sends 2, not 24.
+        // The portal derives base from the PO line's own conversion. Sending base
+        // here would book the delivery short by the conversion factor, and the
+        // POS would confirm the wrong FIFO layer without anything looking amiss.
+        val boxLine = PurchaseOrderDocLine(
+            productId = 55,
+            productName = "Coke 500ml",
+            quantityOrdered = 5.0,      // 5 BOX
+            quantityReceived = null,
+            unitCost = 24.0,
+            selectedUnitCode = "BOX",
+        )
+        val draft = ReceiveDraft.of(order(boxLine)).withEntry(0, "2")
+
+        assertEquals(mapOf(55L to 2.0), draft.receivedByProduct())
+        // The outstanding limit is in the same unit, so 6 boxes is over a 5-box line.
+        assertEquals(5.0, draft.lines.first().remaining, 0.0)
+        assertTrue(ReceiveDraft.of(order(boxLine)).withEntry(0, "6").anyExceedsRemaining)
+    }
+
+    @Test
     fun `the line summary reports outstanding, ordered and what is already in`() {
         val draft = ReceiveDraft.of(order(line(ordered = 10.0, received = 4.0)))
 

@@ -27,13 +27,8 @@ data class ApiErrorBody(
     /**
      * Machine-readable reason, e.g. `OVER_RECEIPT`, `PO_CANCELLED`.
      *
-     * Two spellings are parsed because the portal team announced the codes
-     * without pinning the envelope key, and `ignoreUnknownKeys` means the wrong
-     * guess would be dropped silently rather than failing loudly.
-     * NEEDS VERIFICATION: confirm which key the portal actually sends.
+     * Confirmed by the portal team as a top-level string alongside `success` and
+     * `message` — never nested, and not `error_code`.
      */
     val code: String? = null,
-    val errorCode: String? = null,
-) {
-    val failureCode: String? get() = code ?: errorCode
-}
+)
