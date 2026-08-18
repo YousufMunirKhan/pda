@@ -39,7 +39,8 @@ interface PdaPurchaseReturnRepository {
         lines: List<NewPurchaseReturnLine>,
     ): Result<PurchaseReturnDoc>
 
-    suspend fun list(): Result<List<PurchaseReturnDoc>>
+    /** [purchaseOrderId] narrows the list to returns raised against one PO. */
+    suspend fun list(purchaseOrderId: Long? = null): Result<List<PurchaseReturnDoc>>
 
     suspend fun cancel(id: Long): Result<PurchaseReturnDoc>
 }
@@ -113,8 +114,8 @@ class PdaPurchaseReturnRepositoryImpl @Inject constructor(
         }.mapDocument(attempt, PurchaseReturnDto::toDomain)
     }
 
-    override suspend fun list(): Result<List<PurchaseReturnDoc>> =
-        safeApiCall { api.listPurchaseReturns() }
+    override suspend fun list(purchaseOrderId: Long?): Result<List<PurchaseReturnDoc>> =
+        safeApiCall { api.listPurchaseReturns(purchaseOrderId) }
             .mapRows(PurchaseReturnDto.serializer(), PurchaseReturnDto::toDomain)
 
     override suspend fun cancel(id: Long): Result<PurchaseReturnDoc> {

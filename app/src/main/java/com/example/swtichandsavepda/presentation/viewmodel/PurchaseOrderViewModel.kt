@@ -13,6 +13,7 @@ import com.example.swtichandsavepda.data.remote.PdaApiException
 import com.example.swtichandsavepda.data.repository.PdaPurchaseOrderRepository
 import com.example.swtichandsavepda.data.repository.PdaReferenceRepository
 import com.example.swtichandsavepda.di.WriteScope
+import com.example.swtichandsavepda.presentation.ReceiptHistory
 import com.example.swtichandsavepda.presentation.ReceiveDraft
 import com.example.swtichandsavepda.presentation.SubmitOutcome
 import com.example.swtichandsavepda.presentation.UnitChoice
@@ -64,6 +65,8 @@ data class PurchaseOrderUiState(
     val orders: List<PurchaseOrderDoc> = emptyList(),
     /** The goods-in currently being entered, or null when the sheet is closed. */
     val receiveDraft: ReceiveDraft? = null,
+    /** The receiving history being viewed, or null when that sheet is closed. */
+    val receiptHistory: ReceiptHistory? = null,
     val isLoading: Boolean = false,
     val busyOrderId: Long? = null,
     // Messaging
@@ -326,6 +329,63 @@ class PurchaseOrderViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(receiveDraft = state.receiveDraft?.fillRemaining())
         }
+    }
+
+    /**
+     * Opens the receiving history for a PO and fetches it on demand — a list of
+     * twenty orders should not pull twenty histories nobody will open.
+     */
+    fun showReceiptHistory(orderId: Long) {
+        val order = _uiState.value.orders.firstOrNull { it.id == orderId } ?: return
+        _uiState.update {
+            it.copy(
+                receiptHistory = ReceiptHistory(
+                    orderId = orderId,
+                    orderReference = order.reference,
+                    isLoading = true,
+                ),
+            )
+        }
+        loadReceiptHistory(orderId)
+    }
+
+    fun retryReceiptHistory() {
+        val open = _uiState.value.receiptHistory ?: return
+        _uiState.update { it.copy(receiptHistory = open.copy(isLoading = true, error = null)) }
+        loadReceiptHistory(open.orderId)
+    }
+
+    private fun loadReceiptHistory(orderId: Long) {
+        viewModelScope.launch {
+            repository.receipts(orderId)
+                .onSuccess { receipts ->
+                    _uiState.update { state ->
+                        // Ignore a late response for a sheet the operator closed
+                        // or reopened on a different order.
+                        val open = state.receiptHistory?.takeIf { it.orderId == orderId }
+                            ?: return@update state
+                        state.copy(
+                            receiptHistory = open.copy(receipts = receipts, isLoading = false),
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update { state ->
+                        val open = state.receiptHistory?.takeIf { it.orderId == orderId }
+                            ?: return@update state
+                        state.copy(
+                            receiptHistory = open.copy(
+                                isLoading = false,
+                                error = throwable.message ?: "Couldn't load the receiving history.",
+                            ),
+                        )
+                    }
+                }
+        }
+    }
+
+    fun dismissReceiptHistory() {
+        _uiState.update { it.copy(receiptHistory = null) }
     }
 
     fun setReceiveDeliveryNote(text: String) {

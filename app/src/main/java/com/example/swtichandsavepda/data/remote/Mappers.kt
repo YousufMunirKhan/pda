@@ -6,9 +6,11 @@ import com.example.swtichandsavepda.data.model.PortalState
 import com.example.swtichandsavepda.data.model.ProductUnit
 import com.example.swtichandsavepda.data.model.PurchaseOrderDoc
 import com.example.swtichandsavepda.data.model.PurchaseOrderDocLine
+import com.example.swtichandsavepda.data.model.PurchaseOrderReceipt
 import com.example.swtichandsavepda.data.model.PurchaseOrderTotals
 import com.example.swtichandsavepda.data.model.PurchaseReturnDoc
 import com.example.swtichandsavepda.data.model.PurchaseReturnDocLine
+import com.example.swtichandsavepda.data.model.ReceiptLine
 import com.example.swtichandsavepda.data.model.ReturnableLine
 import com.example.swtichandsavepda.data.model.ProductRef
 import com.example.swtichandsavepda.data.model.StockAdjustmentDoc
@@ -21,6 +23,7 @@ import com.example.swtichandsavepda.data.remote.dto.ProductRefDto
 import com.example.swtichandsavepda.data.remote.dto.ProductUnitDto
 import com.example.swtichandsavepda.data.remote.dto.PurchaseOrderDto
 import com.example.swtichandsavepda.data.remote.dto.PurchaseReturnDto
+import com.example.swtichandsavepda.data.remote.dto.ReceiptDto
 import com.example.swtichandsavepda.data.remote.dto.ReturnableLineDto
 import com.example.swtichandsavepda.data.remote.dto.StockAdjustmentDto
 import com.example.swtichandsavepda.data.remote.dto.StockLocationRefDto
@@ -96,6 +99,24 @@ fun PurchaseReturnDto.toDomain(): PurchaseReturnDoc = PurchaseReturnDoc(
     clientReference = clientReference,
     purchaseOrderId = purchaseOrderId,
     purchaseOrderReference = purchaseOrderReference,
+)
+
+fun ReceiptDto.toDomain(): PurchaseOrderReceipt = PurchaseOrderReceipt(
+    id = id,
+    referenceNo = referenceNo,
+    receivedAtEpochMs = parsePortalInstantMs(receivedAt),
+    receivedBy = receivedBy,
+    note = note,
+    portalState = PortalState.from(portalState),
+    rejectReason = rejectReason,
+    lines = items.orEmpty().map { line ->
+        ReceiptLine(
+            productId = line.productId,
+            productName = line.productName,
+            quantityReceived = line.quantityReceived ?: 0.0,
+            selectedUnitCode = line.selectedUnitCode,
+        )
+    },
 )
 
 fun ReturnableLineDto.toDomain(): ReturnableLine = ReturnableLine(

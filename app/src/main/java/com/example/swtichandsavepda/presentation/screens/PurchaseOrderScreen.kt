@@ -51,6 +51,7 @@ import com.example.swtichandsavepda.presentation.components.BrandCard
 import com.example.swtichandsavepda.presentation.components.BrandScaffold
 import com.example.swtichandsavepda.presentation.components.FormField
 import com.example.swtichandsavepda.presentation.components.ReferenceOption
+import com.example.swtichandsavepda.presentation.components.ReceiptHistorySheet
 import com.example.swtichandsavepda.presentation.components.ReceiveSheet
 import com.example.swtichandsavepda.presentation.components.ReferencePickerField
 import com.example.swtichandsavepda.presentation.components.SectionTitle
@@ -88,6 +89,9 @@ fun PurchaseOrderScreen(
     onSubmit: () -> Unit,
     onScanProduct: () -> Unit,
     onStartReceive: (Long) -> Unit,
+    onShowReceiptHistory: (Long) -> Unit,
+    onRetryReceiptHistory: () -> Unit,
+    onDismissReceiptHistory: () -> Unit,
     onReceiveQuantityChange: (Int, String) -> Unit,
     onReceiveDeliveryNoteChange: (String) -> Unit,
     onFillReceiveRemaining: () -> Unit,
@@ -170,11 +174,20 @@ fun PurchaseOrderScreen(
                         order = order,
                         isBusy = uiState.busyOrderId == order.id,
                         onReceive = { onStartReceive(order.id) },
+                        onShowHistory = { onShowReceiptHistory(order.id) },
                         onCancel = { onCancelOrder(order.id) },
                     )
                 }
             }
         }
+    }
+
+    uiState.receiptHistory?.let { history ->
+        ReceiptHistorySheet(
+            history = history,
+            onRetry = onRetryReceiptHistory,
+            onDismiss = onDismissReceiptHistory,
+        )
     }
 
     uiState.receiveDraft?.let { draft ->
@@ -414,6 +427,7 @@ private fun OrderRow(
     order: PurchaseOrderDoc,
     isBusy: Boolean,
     onReceive: () -> Unit,
+    onShowHistory: () -> Unit,
     onCancel: () -> Unit,
 ) {
     // Derived from the line quantities, never from the status string: a
@@ -482,6 +496,19 @@ private fun OrderRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = StatusDanger,
                 )
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Offered whenever anything has been booked in, including on a
+                // closed PO where the other actions are gone — that is exactly
+                // when someone is chasing a discrepancy.
+                if (received > 0) {
+                    TextButton(onClick = onShowHistory, enabled = !isBusy) { Text("History") }
+                }
             }
 
             // Actions while anything is still outstanding. A partially-received

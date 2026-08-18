@@ -2,6 +2,7 @@ package com.example.swtichandsavepda.data.repository
 
 import com.example.swtichandsavepda.data.model.NewPurchaseOrderLine
 import com.example.swtichandsavepda.data.model.PurchaseOrderDoc
+import com.example.swtichandsavepda.data.model.PurchaseOrderReceipt
 import com.example.swtichandsavepda.data.model.ReturnableLine
 import com.example.swtichandsavepda.data.remote.PdaApiService
 import com.example.swtichandsavepda.data.remote.WriteAttempt
@@ -9,6 +10,7 @@ import com.example.swtichandsavepda.data.remote.dto.PurchaseOrderDto
 import com.example.swtichandsavepda.data.remote.dto.PurchaseOrderRequest
 import com.example.swtichandsavepda.data.remote.dto.ReceiveItemRequest
 import com.example.swtichandsavepda.data.remote.dto.ReceivePurchaseOrderRequest
+import com.example.swtichandsavepda.data.remote.dto.ReceiptDto
 import com.example.swtichandsavepda.data.remote.dto.ReturnableLineDto
 import com.example.swtichandsavepda.data.remote.mapDocument
 import com.example.swtichandsavepda.data.remote.mapRows
@@ -58,6 +60,9 @@ interface PdaPurchaseOrderRepository {
      * portal. See [ReturnableLine] for why it is a guide rather than a control.
      */
     suspend fun returnable(id: Long): Result<List<ReturnableLine>>
+
+    /** Every delivery booked against this PO, newest first. */
+    suspend fun receipts(id: Long): Result<List<PurchaseOrderReceipt>>
 
     suspend fun cancel(id: Long): Result<PurchaseOrderDoc>
 }
@@ -130,6 +135,10 @@ class PdaPurchaseOrderRepositoryImpl @Inject constructor(
     override suspend fun list(): Result<List<PurchaseOrderDoc>> =
         safeApiCall { api.listPurchaseOrders() }
             .mapRows(PurchaseOrderDto.serializer(), PurchaseOrderDto::toDomain)
+
+    override suspend fun receipts(id: Long): Result<List<PurchaseOrderReceipt>> =
+        safeApiCall { api.purchaseOrderReceipts(id) }
+            .mapRows(ReceiptDto.serializer(), ReceiptDto::toDomain)
 
     override suspend fun returnable(id: Long): Result<List<ReturnableLine>> =
         safeApiCall { api.purchaseOrderReturnable(id) }
