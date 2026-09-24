@@ -3,6 +3,7 @@ package com.example.swtichandsavepda.printer
 import com.example.swtichandsavepda.data.model.PortalState
 import com.example.swtichandsavepda.printer.escpos.PrintRenderer
 import com.example.swtichandsavepda.printer.escpos.TextLayout
+import com.example.swtichandsavepda.printer.model.LabelTextSize
 import com.example.swtichandsavepda.printer.model.PrintDocument
 import com.example.swtichandsavepda.printer.model.PrinterSettings
 import com.example.swtichandsavepda.printer.model.SlipLine
@@ -114,6 +115,69 @@ class PrintRendererTest {
     }
 
     @Test
+    fun `defaults are a 50 x 30 sticker in normal text`() {
+        val defaults = PrinterSettings()
+
+        assertEquals(50, defaults.labelWidthMm)
+        assertEquals(32, defaults.labelLengthMm)
+        assertEquals(LabelTextSize.NORMAL, defaults.labelTextSize)
+    }
+
+    @Test
+    fun `a narrower sticker wraps the name to its own width`() {
+        val longName = label.copy(productName = "Extra Large Family Size Chocolate Digestive Biscuits")
+
+        val text = renderer.render(longName, PrinterSettings(labelWidthMm = 40)).toString(Charsets.ISO_8859_1)
+
+        // 40 mm less 1 mm each side = 38 mm = 304 dots = 25 font-A characters.
+        val nameLines = text.split('\n').filter { it.contains("Extra") || it.contains("Chocolate") }
+        assertTrue(nameLines.isNotEmpty())
+        assertTrue(nameLines.all { it.takeLastWhile { c -> c.code >= 0x20 }.length <= 25 })
+    }
+
+    @Test
+    fun `a barcode that fits 50 mm but not 40 mm is refused on the narrow sticker`() {
+        val wide = label.copy(barcode = "X".repeat(25))
+
+        renderer.render(wide, PrinterSettings(labelWidthMm = 50))
+        val error = runCatching { renderer.render(wide, PrinterSettings(labelWidthMm = 40)) }.exceptionOrNull()
+
+        assertTrue(error is PrinterException.NothingToPrint)
+    }
+
+    @Test
+    fun `text size changes the fonts sent to the printer`() {
+        val small = renderer.render(label, PrinterSettings(labelTextSize = LabelTextSize.SMALL))
+        val large = renderer.render(label, PrinterSettings(labelTextSize = LabelTextSize.LARGE))
+
+        assertTrue(small.containsSequence(ESC, 'M'.code, 1)) // font B name
+        assertFalse(small.containsSequence(GS, '!'.code, 0x11))
+        assertTrue(large.containsSequence(GS, '!'.code, 0x22)) // triple-size price
+    }
+
+    @Test
+    fun `a price too wide for the sticker steps down a size instead of wrapping`() {
+        val pricey = label.copy(price = 1234.56) // "£1234.56" = 8 characters
+
+        val bytes = renderer.render(pricey, PrinterSettings(labelWidthMm = 30, labelTextSize = LabelTextSize.LARGE))
+
+        assertFalse(bytes.containsSequence(GS, '!'.code, 0x22))
+        assertTrue(bytes.containsSequence(GS, '!'.code, 0x11))
+    }
+
+    @Test
+    fun `large text still feeds exactly one label length`() {
+        // 40 and 48 mm: both long enough for the barcode's full height, so the
+        // extra 8 mm can only go to feed. (At 32 mm large text shortens the bars,
+        // and the difference is shared between bars and feed.)
+        val large = PrinterSettings(labelTextSize = LabelTextSize.LARGE)
+        val short = renderer.render(label, large.copy(labelLengthMm = 40))
+        val long = renderer.render(label, large.copy(labelLengthMm = 48))
+
+        assertEquals(64, long.totalFeedDots() - short.totalFeedDots())
+    }
+
+    @Test
     fun `long names wrap on words and a truncated line says so`() {
         val lines = TextLayout.wrap("Extra Large Family Size Chocolate Digestive Biscuits", 16, maxLines = 2)
 
@@ -122,7 +186,55 @@ class PrintRendererTest {
         assertTrue(lines.last().endsWith(".."))
     }
 
+    @Test
+    fun `every width, length and text size advances exactly one label length`() {
+        val longName = label.copy(productName = "Extra Large Family Size Chocolate Digestive Biscuits", unitLabel = "Box × 12")
+        for (size in LabelTextSize.entries) {
+            for (width in listOf(30, 40, 50, 58)) {
+                for (length in listOf(25, 32, 40, 60)) {
+                    val settings = PrinterSettings(labelWidthMm = width, labelLengthMm = length, labelTextSize = size)
+                    val advanced = renderer.render(longName, settings).simulatedAdvanceDots()
+                    assertEquals("$size ${width}x$length", length * 8, advanced)
+                }
+            }
+        }
+    }
+
     // ── Byte helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Replays the stream and adds up how far the paper moves: each line feed
+     * advances by the current `ESC 3` spacing, `ESC J` by its dots, and a
+     * barcode by its bar height plus the digits under it.
+     */
+    private fun ByteArray.simulatedAdvanceDots(): Int {
+        var spacing = 30
+        var barHeight = 0
+        var total = 0
+        var index = 0
+        fun at(offset: Int) = this[index + offset].toInt() and 0xFF
+        while (index < size) {
+            val byte = at(0)
+            when {
+                byte == ESC && at(1) == '3'.code -> { spacing = at(2); index += 3 }
+                byte == ESC && at(1) == 'J'.code -> { total += at(2); index += 3 }
+                byte == ESC && at(1) == '@'.code -> index += 2
+                byte == ESC -> index += 3 // a, E, M, t — one parameter
+                byte == FS -> index += 2
+                byte == GS && at(1) == 'h'.code -> { barHeight = at(2); index += 3 }
+                byte == GS && at(1) == 'k'.code -> {
+                    index += 4 + at(3) // GS k m n + n payload bytes
+                    total += barHeight + 30
+                    if (index < size && at(0) == 0x0A) index++ // the LF that ends the barcode
+                }
+                byte == GS && at(1) == 0x0C -> index += 2
+                byte == GS -> index += 3 // !, w, H, f — one parameter
+                byte == 0x0A -> { total += spacing; index++ }
+                else -> index++
+            }
+        }
+        return total
+    }
 
     private fun ByteArray.totalFeedDots(): Int {
         var total = 0

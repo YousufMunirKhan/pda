@@ -6,6 +6,7 @@ import com.example.swtichandsavepda.presentation.PrintMessage
 import com.example.swtichandsavepda.printer.PrinterRepository
 import com.example.swtichandsavepda.printer.escpos.PrintRenderer
 import com.example.swtichandsavepda.printer.model.BluetoothPrinter
+import com.example.swtichandsavepda.printer.model.LabelTextSize
 import com.example.swtichandsavepda.printer.model.PrintDocument
 import com.example.swtichandsavepda.printer.model.PrintResult
 import com.example.swtichandsavepda.printer.model.PrinterConnection
@@ -28,6 +29,7 @@ data class PrinterSettingsUiState(
     val isRawBtInstalled: Boolean = false,
     /** What the operator is typing, so "3" on the way to "32" is not clamped mid-edit. */
     val labelLengthInput: String = PrinterSettings.DEFAULT_LABEL_LENGTH_MM.toString(),
+    val labelWidthInput: String = PrinterSettings.DEFAULT_LABEL_WIDTH_MM.toString(),
     val isTesting: Boolean = false,
     val message: PrintMessage? = null,
 )
@@ -38,7 +40,10 @@ class PrinterSettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val local = MutableStateFlow(
-        PrinterSettingsUiState(labelLengthInput = repository.settings.value.labelLengthMm.toString()),
+        PrinterSettingsUiState(
+            labelLengthInput = repository.settings.value.labelLengthMm.toString(),
+            labelWidthInput = repository.settings.value.labelWidthMm.toString(),
+        ),
     )
 
     val uiState: StateFlow<PrinterSettingsUiState> =
@@ -95,6 +100,17 @@ class PrinterSettingsViewModel @Inject constructor(
             repository.updateSettings { it.copy(labelLengthMm = millimetres) }
         }
     }
+
+    fun setLabelWidth(text: String) {
+        val digits = text.filter(Char::isDigit).take(2)
+        local.update { it.copy(labelWidthInput = digits) }
+        val millimetres = digits.toIntOrNull() ?: return
+        if (millimetres in PrinterSettings.MIN_LABEL_WIDTH_MM..PrinterSettings.MAX_LABEL_WIDTH_MM) {
+            repository.updateSettings { it.copy(labelWidthMm = millimetres) }
+        }
+    }
+
+    fun setLabelTextSize(size: LabelTextSize) = repository.updateSettings { it.copy(labelTextSize = size) }
 
     fun setGapSensor(enabled: Boolean) = repository.updateSettings { it.copy(useGapSensor = enabled) }
 

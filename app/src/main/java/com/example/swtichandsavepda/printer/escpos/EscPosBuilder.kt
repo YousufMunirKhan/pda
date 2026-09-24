@@ -38,6 +38,9 @@ internal class EscPosBuilder {
 
     fun size(textSize: TextSize) = apply { write(GS, '!'.code, textSize.code) }
 
+    /** Font A (12 × 24 dots) or the narrower font B (9 × 17). */
+    fun font(font: Font) = apply { write(ESC, 'M'.code, font.code) }
+
     /**
      * Fixes the height of every following text line. Without it the printer's
      * default depends on its firmware, and label heights stop adding up.
@@ -97,6 +100,12 @@ internal class EscPosBuilder {
         NORMAL(0x00),
         DOUBLE_HEIGHT(0x01),
         DOUBLE(0x11),
+        TRIPLE(0x22),
+    }
+
+    enum class Font(val code: Int, val charWidthDots: Int) {
+        A(0, 12),
+        B(1, 9),
     }
 
     companion object {

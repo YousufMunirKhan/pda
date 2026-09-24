@@ -3,6 +3,7 @@ package com.example.swtichandsavepda.printer
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import com.example.swtichandsavepda.printer.model.LabelTextSize
 import com.example.swtichandsavepda.printer.model.PrinterConnection
 import com.example.swtichandsavepda.printer.model.PrinterSettings
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -42,6 +43,8 @@ class SharedPreferencesPrinterSettingsStore @Inject constructor(
             putString(KEY_BLUETOOTH_ADDRESS, next.bluetoothAddress)
             putString(KEY_BLUETOOTH_NAME, next.bluetoothName)
             putInt(KEY_LABEL_LENGTH_MM, next.labelLengthMm)
+            putInt(KEY_LABEL_WIDTH_MM, next.labelWidthMm)
+            putString(KEY_LABEL_TEXT_SIZE, next.labelTextSize.name)
             putBoolean(KEY_GAP_SENSOR, next.useGapSensor)
             putBoolean(KEY_AUTO_PRINT, next.autoPrintOnScan)
             putInt(KEY_LABEL_COPIES, next.labelCopies)
@@ -58,6 +61,10 @@ class SharedPreferencesPrinterSettingsStore @Inject constructor(
             bluetoothAddress = preferences.getString(KEY_BLUETOOTH_ADDRESS, null),
             bluetoothName = preferences.getString(KEY_BLUETOOTH_NAME, null),
             labelLengthMm = preferences.getInt(KEY_LABEL_LENGTH_MM, defaults.labelLengthMm),
+            labelWidthMm = preferences.getInt(KEY_LABEL_WIDTH_MM, defaults.labelWidthMm),
+            labelTextSize = preferences.getString(KEY_LABEL_TEXT_SIZE, null)
+                ?.let { stored -> LabelTextSize.entries.firstOrNull { it.name == stored } }
+                ?: defaults.labelTextSize,
             useGapSensor = preferences.getBoolean(KEY_GAP_SENSOR, defaults.useGapSensor),
             autoPrintOnScan = preferences.getBoolean(KEY_AUTO_PRINT, defaults.autoPrintOnScan),
             labelCopies = preferences.getInt(KEY_LABEL_COPIES, defaults.labelCopies),
@@ -69,6 +76,10 @@ class SharedPreferencesPrinterSettingsStore @Inject constructor(
             PrinterSettings.MIN_LABEL_LENGTH_MM,
             PrinterSettings.MAX_LABEL_LENGTH_MM,
         ),
+        labelWidthMm = labelWidthMm.coerceIn(
+            PrinterSettings.MIN_LABEL_WIDTH_MM,
+            PrinterSettings.MAX_LABEL_WIDTH_MM,
+        ),
         labelCopies = labelCopies.coerceIn(1, PrinterSettings.MAX_COPIES),
     )
 
@@ -78,6 +89,8 @@ class SharedPreferencesPrinterSettingsStore @Inject constructor(
         const val KEY_BLUETOOTH_ADDRESS = "bluetooth_address"
         const val KEY_BLUETOOTH_NAME = "bluetooth_name"
         const val KEY_LABEL_LENGTH_MM = "label_length_mm"
+        const val KEY_LABEL_WIDTH_MM = "label_width_mm"
+        const val KEY_LABEL_TEXT_SIZE = "label_text_size"
         const val KEY_GAP_SENSOR = "gap_sensor"
         const val KEY_AUTO_PRINT = "auto_print_on_scan"
         const val KEY_LABEL_COPIES = "label_copies"

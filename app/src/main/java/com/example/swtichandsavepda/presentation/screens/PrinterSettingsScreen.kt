@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +45,7 @@ import com.example.swtichandsavepda.presentation.components.PrintFeedback
 import com.example.swtichandsavepda.presentation.components.SectionTitle
 import com.example.swtichandsavepda.presentation.components.rememberBluetoothPermissionState
 import com.example.swtichandsavepda.printer.model.BluetoothPrinter
+import com.example.swtichandsavepda.printer.model.LabelTextSize
 import com.example.swtichandsavepda.printer.model.PrinterConnection
 import com.example.swtichandsavepda.printer.model.PrinterSettings
 import com.example.swtichandsavepda.ui.theme.brandColors
@@ -55,6 +57,8 @@ fun PrinterSettingsScreen(
     onSelectConnection: (PrinterConnection) -> Unit,
     onSelectPrinter: (BluetoothPrinter) -> Unit,
     onLabelLengthChange: (String) -> Unit,
+    onLabelWidthChange: (String) -> Unit,
+    onLabelTextSizeChange: (LabelTextSize) -> Unit,
     onGapSensorChange: (Boolean) -> Unit,
     onAutoPrintChange: (Boolean) -> Unit,
     onCopiesChange: (Int) -> Unit,
@@ -91,7 +95,15 @@ fun PrinterSettingsScreen(
             ConnectionCard(uiState, onSelectConnection, onSelectPrinter, onRefresh)
 
             SectionTitle(text = "Labels")
-            LabelCard(settings, uiState.labelLengthInput, onLabelLengthChange, onGapSensorChange, onAutoPrintChange, onCopiesChange)
+            LabelCard(
+                uiState = uiState,
+                onLabelLengthChange = onLabelLengthChange,
+                onLabelWidthChange = onLabelWidthChange,
+                onLabelTextSizeChange = onLabelTextSizeChange,
+                onGapSensorChange = onGapSensorChange,
+                onAutoPrintChange = onAutoPrintChange,
+                onCopiesChange = onCopiesChange,
+            )
 
             SectionTitle(text = "Check it works")
             PrintFeedback(
@@ -197,18 +209,36 @@ private fun ConnectionCard(
 
 @Composable
 private fun LabelCard(
-    settings: PrinterSettings,
-    labelLengthInput: String,
+    uiState: PrinterSettingsUiState,
     onLabelLengthChange: (String) -> Unit,
+    onLabelWidthChange: (String) -> Unit,
+    onLabelTextSizeChange: (LabelTextSize) -> Unit,
     onGapSensorChange: (Boolean) -> Unit,
     onAutoPrintChange: (Boolean) -> Unit,
     onCopiesChange: (Int) -> Unit,
 ) {
+    val settings = uiState.settings
+    val labelLengthInput = uiState.labelLengthInput
     val lengthValid = labelLengthInput.toIntOrNull()
         ?.let { it in PrinterSettings.MIN_LABEL_LENGTH_MM..PrinterSettings.MAX_LABEL_LENGTH_MM } == true
+    val widthValid = uiState.labelWidthInput.toIntOrNull()
+        ?.let { it in PrinterSettings.MIN_LABEL_WIDTH_MM..PrinterSettings.MAX_LABEL_WIDTH_MM } == true
 
     BrandCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            FormField(
+                value = uiState.labelWidthInput,
+                onValueChange = onLabelWidthChange,
+                label = "Label width (mm)",
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Next,
+                isError = !widthValid,
+                helper = if (widthValid) {
+                    "The sticker's width, e.g. 50 for a 50 × 30 label. The printer reaches 48 mm at most."
+                } else {
+                    "Enter ${PrinterSettings.MIN_LABEL_WIDTH_MM}–${PrinterSettings.MAX_LABEL_WIDTH_MM} mm."
+                },
+            )
             FormField(
                 value = labelLengthInput,
                 onValueChange = onLabelLengthChange,
@@ -223,6 +253,17 @@ private fun LabelCard(
                     "Enter ${PrinterSettings.MIN_LABEL_LENGTH_MM}–${PrinterSettings.MAX_LABEL_LENGTH_MM} mm."
                 },
             )
+            Text("Text size", fontWeight = FontWeight.SemiBold, color = MaterialTheme.brandColors.textHeading)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LabelTextSize.entries.forEach { size ->
+                    FilterChip(
+                        selected = settings.labelTextSize == size,
+                        onClick = { onLabelTextSizeChange(size) },
+                        label = { Text(size.label) },
+                    )
+                }
+            }
+            Caption("Name and price size. The barcode takes the space that is left.")
             SwitchRow(
                 title = "Printer detects label gaps",
                 caption = "Only if your printer has a label sensor. Otherwise the length above is used.",

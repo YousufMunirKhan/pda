@@ -5,6 +5,7 @@ import com.example.swtichandsavepda.data.model.UomMath
 import com.example.swtichandsavepda.printer.PrinterException
 import com.example.swtichandsavepda.printer.escpos.EscPosBuilder.Alignment
 import com.example.swtichandsavepda.printer.escpos.EscPosBuilder.TextSize
+import com.example.swtichandsavepda.printer.model.LabelTextSize
 import com.example.swtichandsavepda.printer.model.PrintDocument
 import com.example.swtichandsavepda.printer.model.PrinterSettings
 import com.example.swtichandsavepda.printer.model.SlipLine
@@ -39,39 +40,52 @@ internal class PrintRenderer(zone: ZoneId = ZoneId.systemDefault()) {
 
     /**
      * One sticker, padded to exactly [PrinterSettings.labelLengthMm] so a run of
-     * labels stays registered to the roll. When the text would crowd out the
-     * barcode, detail is shed in order of least use: the unit line, then the
-     * second name line, then the price — the barcode is the point of the label.
+     * labels stays registered to the roll, and no wider than the sticker.
+     *
+     * Everything is centred: stickers sit in the middle of the roll and so does
+     * the print head, so centred content lands on the sticker at any width with
+     * no margin commands the printer might not support.
+     *
+     * When the text would crowd out the barcode, detail is shed in order of
+     * least use: the unit line, then the second name line, then the price. The
+     * barcode is the point of the label.
      */
     private fun renderLabel(
         builder: EscPosBuilder,
         label: PrintDocument.ProductLabel,
         settings: PrinterSettings,
     ) {
+        val areaDots = labelAreaDots(settings.labelWidthMm)
         val spec = BarcodeSpec.of(label.barcode)
             ?: throw PrinterException.NothingToPrint("This product has no barcode to print.")
-        val moduleWidth = spec.moduleWidthFor(PRINTABLE_DOTS)
-            ?: throw PrinterException.NothingToPrint("This barcode is too long to fit on a 58 mm label.")
+        val moduleWidth = spec.moduleWidthFor(areaDots)
+            ?: throw PrinterException.NothingToPrint(
+                "This barcode is too long for a ${settings.labelWidthMm} mm label. Use a wider label.",
+            )
 
+        val style = LabelStyle.of(settings.labelTextSize)
         val pitchDots = settings.labelLengthMm * DOTS_PER_MM
-        val plan = planLabel(label, pitchDots)
+        val plan = planLabel(label, pitchDots, areaDots, style)
         val startDots = builder.consumedDots
 
-        builder.feedDots(LABEL_MARGIN_DOTS)
-            .align(Alignment.CENTER)
-            .bold(true)
-            .setLineSpacing(EscPosBuilder.DEFAULT_LINE_SPACING_DOTS)
-        plan.nameLines.forEach { builder.line(it) }
-        builder.bold(false)
-        plan.unitLine?.let { builder.line(it) }
+        builder.feedDots(LABEL_MARGIN_DOTS).align(Alignment.CENTER)
 
-        plan.priceLine?.let { price ->
-            builder.size(TextSize.DOUBLE).bold(true).setLineSpacing(DOUBLE_LINE_DOTS)
-                .line(price)
-                .size(TextSize.NORMAL).bold(false).setLineSpacing(EscPosBuilder.DEFAULT_LINE_SPACING_DOTS)
+        builder.font(style.nameFont).size(style.nameSize).bold(true).setLineSpacing(style.nameLineDots)
+        plan.nameLines.forEach { builder.line(it) }
+        builder.size(TextSize.NORMAL).bold(false)
+
+        plan.unitLine?.let { unit -> builder.setLineSpacing(style.detailLineDots).line(unit) }
+
+        plan.price?.let { price ->
+            builder.font(EscPosBuilder.Font.A).size(price.size).bold(true).setLineSpacing(price.lineDots)
+                .line(price.text)
+                .size(TextSize.NORMAL).bold(false)
         }
 
-        builder.barcode(spec, plan.barHeightDots, moduleWidth).align(Alignment.LEFT)
+        builder.font(EscPosBuilder.Font.A)
+            .setLineSpacing(EscPosBuilder.DEFAULT_LINE_SPACING_DOTS)
+            .barcode(spec, plan.barHeightDots, moduleWidth)
+            .align(Alignment.LEFT)
 
         if (settings.useGapSensor) {
             builder.feedToNextLabel()
@@ -81,34 +95,105 @@ internal class PrintRenderer(zone: ZoneId = ZoneId.systemDefault()) {
         }
     }
 
+    /**
+     * The printable width for a sticker [widthMm] wide: the sticker less a
+     * millimetre of safety each side, capped at what the head can reach.
+     */
+    private fun labelAreaDots(widthMm: Int): Int =
+        ((widthMm - 2 * LABEL_SIDE_SAFETY_MM) * DOTS_PER_MM).coerceIn(MIN_AREA_DOTS, PRINTABLE_DOTS)
+
+    /** One printed size: its ESC/POS size, how wide a character is and how tall a line. */
+    private data class TextStyle(val size: TextSize, val charDots: Int, val lineDots: Int)
+
+    /**
+     * What each [LabelTextSize] means on paper. The price is the largest text on
+     * the label because it is what a shopper reads first.
+     */
+    private data class LabelStyle(
+        val nameFont: EscPosBuilder.Font,
+        val nameSize: TextSize,
+        val nameLineDots: Int,
+        val detailLineDots: Int,
+        /** Biggest first; a price too wide for the sticker steps down a size. */
+        val priceStyles: List<TextStyle>,
+    ) {
+        val nameCharDots: Int get() = nameFont.charWidthDots
+
+        companion object {
+            private val PRICE_TRIPLE = TextStyle(TextSize.TRIPLE, charDots = 36, lineDots = 78)
+            private val PRICE_DOUBLE = TextStyle(TextSize.DOUBLE, charDots = 24, lineDots = 54)
+            private val PRICE_NORMAL = TextStyle(TextSize.NORMAL, charDots = 12, lineDots = 30)
+
+            fun of(size: LabelTextSize): LabelStyle = when (size) {
+                LabelTextSize.SMALL -> LabelStyle(
+                    nameFont = EscPosBuilder.Font.B,
+                    nameSize = TextSize.NORMAL,
+                    nameLineDots = 22,
+                    detailLineDots = 22,
+                    priceStyles = listOf(PRICE_NORMAL),
+                )
+
+                LabelTextSize.NORMAL -> LabelStyle(
+                    nameFont = EscPosBuilder.Font.A,
+                    nameSize = TextSize.NORMAL,
+                    nameLineDots = 30,
+                    detailLineDots = 30,
+                    priceStyles = listOf(PRICE_DOUBLE, PRICE_NORMAL),
+                )
+
+                LabelTextSize.LARGE -> LabelStyle(
+                    nameFont = EscPosBuilder.Font.A,
+                    nameSize = TextSize.DOUBLE_HEIGHT,
+                    nameLineDots = 54,
+                    detailLineDots = 30,
+                    priceStyles = listOf(PRICE_TRIPLE, PRICE_DOUBLE, PRICE_NORMAL),
+                )
+            }
+        }
+    }
+
+    private data class PriceLine(val text: String, val size: TextSize, val lineDots: Int)
+
     private data class LabelPlan(
         val nameLines: List<String>,
         val unitLine: String?,
-        val priceLine: String?,
-        val barHeightDots: Int,
+        val price: PriceLine?,
+        val barHeightDots: Int = 0,
     )
 
-    private fun planLabel(label: PrintDocument.ProductLabel, pitchDots: Int): LabelPlan {
-        val name = TextLayout.wrap(label.productName, LINE_CHARS, maxLines = 2)
-        val unit = label.unitLabel?.takeIf { it.isNotBlank() }?.let { TextLayout.wrap(it, LINE_CHARS, 1).first() }
-        val price = label.price?.let(::money)
+    private fun planLabel(
+        label: PrintDocument.ProductLabel,
+        pitchDots: Int,
+        areaDots: Int,
+        style: LabelStyle,
+    ): LabelPlan {
+        val nameChars = areaDots / style.nameCharDots
+        val detailChars = areaDots / style.nameFont.charWidthDots
+        val name = TextLayout.wrap(label.productName, nameChars, maxLines = 2)
+        val unit = label.unitLabel?.takeIf { it.isNotBlank() }?.let { TextLayout.wrap(it, detailChars, 1).first() }
+        val price = label.price?.let(::money)?.let { text ->
+            // A price that wraps would print half on the next line; step down instead.
+            val fitting = style.priceStyles.firstOrNull { text.length * it.charDots <= areaDots }
+                ?: style.priceStyles.last()
+            PriceLine(text, fitting.size, fitting.lineDots)
+        }
 
         val candidates = listOf(
-            LabelPlan(name, unit, price, 0),
-            LabelPlan(name, null, price, 0),
-            LabelPlan(name.take(1), null, price, 0),
-            LabelPlan(name.take(1), null, null, 0),
+            LabelPlan(name, unit, price),
+            LabelPlan(name, null, price),
+            LabelPlan(name.take(1), null, price),
+            LabelPlan(name.take(1), null, null),
         )
         return candidates.firstNotNullOfOrNull { plan ->
-            barHeightFor(plan, pitchDots).takeIf { it >= MIN_BAR_DOTS }?.let { plan.copy(barHeightDots = it) }
+            barHeightFor(plan, pitchDots, style).takeIf { it >= MIN_BAR_DOTS }?.let { plan.copy(barHeightDots = it) }
         } ?: candidates.last().copy(barHeightDots = MIN_BAR_DOTS)
     }
 
-    private fun barHeightFor(plan: LabelPlan, pitchDots: Int): Int {
-        val textLines = plan.nameLines.size + (if (plan.unitLine != null) 1 else 0)
+    private fun barHeightFor(plan: LabelPlan, pitchDots: Int, style: LabelStyle): Int {
         val fixed = LABEL_MARGIN_DOTS * 2 +
-            textLines * EscPosBuilder.DEFAULT_LINE_SPACING_DOTS +
-            (if (plan.priceLine != null) DOUBLE_LINE_DOTS else 0) +
+            plan.nameLines.size * style.nameLineDots +
+            (if (plan.unitLine != null) style.detailLineDots else 0) +
+            (plan.price?.lineDots ?: 0) +
             EscPosBuilder.BARCODE_CAPTION_DOTS
         return (pitchDots - fixed).coerceAtMost(MAX_BAR_DOTS)
     }
@@ -251,6 +336,8 @@ internal class PrintRenderer(zone: ZoneId = ZoneId.systemDefault()) {
         private const val MIN_NAME_CHARS = 8
 
         private const val LABEL_MARGIN_DOTS = 12
+        private const val LABEL_SIDE_SAFETY_MM = 1
+        private const val MIN_AREA_DOTS = 160
         private const val MIN_BAR_DOTS = 32
         private const val MAX_BAR_DOTS = 80
 

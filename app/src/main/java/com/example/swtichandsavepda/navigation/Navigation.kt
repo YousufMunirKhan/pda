@@ -386,6 +386,8 @@ fun AppNavigation() {
                 onSelectConnection = viewModel::selectConnection,
                 onSelectPrinter = viewModel::selectBluetoothPrinter,
                 onLabelLengthChange = viewModel::setLabelLength,
+                onLabelWidthChange = viewModel::setLabelWidth,
+                onLabelTextSizeChange = viewModel::setLabelTextSize,
                 onGapSensorChange = viewModel::setGapSensor,
                 onAutoPrintChange = viewModel::setAutoPrint,
                 onCopiesChange = viewModel::setLabelCopies,
