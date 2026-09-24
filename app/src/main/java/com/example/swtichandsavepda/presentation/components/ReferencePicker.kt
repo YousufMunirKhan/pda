@@ -62,6 +62,8 @@ data class ReferenceOption(
     val title: String,
     val subtitle: String? = null,
     val cost: Double? = null,
+    /** Base retail price, for products — what the price editor opens on. */
+    val retail: Double? = null,
 )
 
 /**

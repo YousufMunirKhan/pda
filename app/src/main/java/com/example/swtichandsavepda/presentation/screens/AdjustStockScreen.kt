@@ -51,6 +51,7 @@ import com.example.swtichandsavepda.presentation.components.FormField
 import com.example.swtichandsavepda.presentation.components.PortalStateChip
 import com.example.swtichandsavepda.presentation.components.ReferenceOption
 import com.example.swtichandsavepda.presentation.components.ReferencePickerField
+import com.example.swtichandsavepda.presentation.components.UpdatePriceButton
 import com.example.swtichandsavepda.presentation.components.SectionTitle
 import com.example.swtichandsavepda.presentation.components.SubmitOutcomeBanner
 import com.example.swtichandsavepda.presentation.components.UnitSection
@@ -77,6 +78,7 @@ fun AdjustStockScreen(
     onCancelRecent: (Long) -> Unit,
     onRefresh: () -> Unit,
     onDismissMessages: () -> Unit,
+    onUpdatePrice: (ReferenceOption) -> Unit,
     onBackClick: () -> Unit,
 ) {
     // A stock write that has left the device cannot be un-sent, and leaving the
@@ -133,6 +135,9 @@ fun AdjustStockScreen(
                         placeholder = "Search name, code or barcode",
                         onScanRequested = onScanProduct,
                     )
+                    uiState.product?.let { product ->
+                        UpdatePriceButton(onClick = { onUpdatePrice(product) }, enabled = !uiState.isSubmitting)
+                    }
 
                     UnitSection(
                         choice = uiState.unitChoice,

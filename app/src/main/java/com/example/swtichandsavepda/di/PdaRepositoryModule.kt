@@ -4,6 +4,8 @@ import com.example.swtichandsavepda.data.local.SubmissionJournal
 import com.example.swtichandsavepda.data.local.SubmissionJournalImpl
 import com.example.swtichandsavepda.data.repository.PdaAuthRepository
 import com.example.swtichandsavepda.data.repository.PdaAuthRepositoryImpl
+import com.example.swtichandsavepda.data.repository.PdaProductPriceRepository
+import com.example.swtichandsavepda.data.repository.PdaProductPriceRepositoryImpl
 import com.example.swtichandsavepda.data.repository.PdaPurchaseOrderRepository
 import com.example.swtichandsavepda.data.repository.PdaPurchaseOrderRepositoryImpl
 import com.example.swtichandsavepda.data.repository.PdaPurchaseReturnRepository
@@ -50,6 +52,12 @@ abstract class PdaRepositoryModule {
     abstract fun bindPdaReferenceRepository(
         impl: PdaReferenceRepositoryImpl,
     ): PdaReferenceRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindPdaProductPriceRepository(
+        impl: PdaProductPriceRepositoryImpl,
+    ): PdaProductPriceRepository
 
     @Binds
     @Singleton

@@ -27,7 +27,9 @@ import androidx.compose.material.icons.filled.AddShoppingCart
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -61,11 +63,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.swtichandsavepda.data.model.BarcodeMatch
 import com.example.swtichandsavepda.data.model.ProductRef
+import com.example.swtichandsavepda.presentation.PrintUiState
 import com.example.swtichandsavepda.presentation.components.BrandScaffold
 import com.example.swtichandsavepda.presentation.components.CameraPermissionStatus
 import com.example.swtichandsavepda.presentation.components.CameraPreview
+import com.example.swtichandsavepda.presentation.components.CopiesStepper
 import com.example.swtichandsavepda.presentation.components.HardwareScannerEffect
 import com.example.swtichandsavepda.presentation.components.IconWell
+import com.example.swtichandsavepda.presentation.components.PrintFeedback
 import com.example.swtichandsavepda.presentation.components.rememberPdaScanController
 import com.example.swtichandsavepda.presentation.components.StatusCapsule
 import com.example.swtichandsavepda.presentation.components.openAppSettings
@@ -112,6 +117,11 @@ fun BarcodeScreen(
     onUploadStock: (ScannedTarget) -> Unit,
     onAddToPo: (ScannedTarget) -> Unit,
     onReturn: (ScannedTarget) -> Unit,
+    printState: PrintUiState,
+    defaultLabelCopies: Int,
+    onPrintLabel: (ScannedTarget, Int) -> Unit,
+    onDismissPrintMessage: () -> Unit,
+    onUpdatePrice: (ScannedTarget) -> Unit,
     onBackClick: () -> Unit,
 ) {
     var manualBarcode by remember { mutableStateOf("") }
@@ -294,6 +304,11 @@ fun BarcodeScreen(
                     onUploadStock = { onUploadStock(outcome.target) },
                     onAddToPo = { onAddToPo(outcome.target) },
                     onReturn = { onReturn(outcome.target) },
+                    printState = printState,
+                    defaultLabelCopies = defaultLabelCopies,
+                    onPrintLabel = { copies -> onPrintLabel(outcome.target, copies) },
+                    onDismissPrintMessage = onDismissPrintMessage,
+                    onUpdatePrice = { onUpdatePrice(outcome.target) },
                     onCancel = onDismissOutcome,
                 )
 
@@ -403,6 +418,11 @@ private fun FoundSheet(
     onUploadStock: () -> Unit,
     onAddToPo: () -> Unit,
     onReturn: () -> Unit,
+    printState: PrintUiState,
+    defaultLabelCopies: Int,
+    onPrintLabel: (Int) -> Unit,
+    onDismissPrintMessage: () -> Unit,
+    onUpdatePrice: () -> Unit,
     onCancel: () -> Unit,
 ) {
     val product: ProductRef = target.product
@@ -458,7 +478,16 @@ private fun FoundSheet(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        LabelPrintRow(
+            printState = printState,
+            defaultCopies = defaultLabelCopies,
+            onPrint = onPrintLabel,
+            onDismissMessage = onDismissPrintMessage,
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         Text(
             text = "WHAT NEXT?",
@@ -469,6 +498,16 @@ private fun FoundSheet(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        ActionRow(
+            label = "Update price",
+            caption = product.retail?.let { String.format(Locale.UK, "Retail now £%.2f", it) }
+                ?: "Change the retail price",
+            icon = Icons.Default.Sell,
+            wellColor = WellBlue,
+            glyphColor = WellBlueFg,
+            onClick = onUpdatePrice,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
         ActionRow(
             label = "Adjust stock",
             caption = "Correct the count",
@@ -519,6 +558,68 @@ private fun FoundSheet(
                 .height(48.dp),
         ) {
             Text("Scan another", fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/**
+ * Sticker printing for the scanned product: how many, and print. The copies
+ * start at the operator's default from Printer settings.
+ */
+@Composable
+private fun LabelPrintRow(
+    printState: PrintUiState,
+    defaultCopies: Int,
+    onPrint: (Int) -> Unit,
+    onDismissMessage: () -> Unit,
+) {
+    var copies by remember(defaultCopies) { mutableStateOf(defaultCopies) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.brandColors.cardStroke, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconWell(icon = Icons.Default.Print, tint = WellGreenFg, background = WellGreen, size = 40.dp)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Barcode label",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.brandColors.textHeading,
+                )
+                Text(
+                    text = "Name, price and barcode",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.brandColors.textSecondary,
+                )
+            }
+            CopiesStepper(copies = copies, onChange = { copies = it }, enabled = !printState.isPrinting)
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { onPrint(copies) },
+            enabled = !printState.isPrinting,
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+        ) {
+            Icon(Icons.Default.Print, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = if (copies > 1) "Print $copies labels" else "Print label",
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        if (printState.isPrinting || printState.message != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            PrintFeedback(state = printState, onDismiss = onDismissMessage)
         }
     }
 }

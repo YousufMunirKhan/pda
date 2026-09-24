@@ -4,6 +4,8 @@ import com.example.swtichandsavepda.data.remote.dto.DocumentEnvelope
 import com.example.swtichandsavepda.data.remote.dto.LoginRequest
 import com.example.swtichandsavepda.data.remote.dto.LoginResponse
 import com.example.swtichandsavepda.data.remote.dto.MeResponse
+import com.example.swtichandsavepda.data.remote.dto.ProductPriceDto
+import com.example.swtichandsavepda.data.remote.dto.ProductPriceRequest
 import com.example.swtichandsavepda.data.remote.dto.PurchaseOrderDto
 import com.example.swtichandsavepda.data.remote.dto.PurchaseOrderRequest
 import com.example.swtichandsavepda.data.remote.dto.PurchaseReturnDto
@@ -68,6 +70,17 @@ interface PdaApiService {
     /** The units a product can be bought/returned/adjusted in (unit selector). */
     @GET("api/pda/products/{id}/units")
     suspend fun productUnits(@Path("id") productId: Long): JsonElement
+
+    /**
+     * Sets the product's base retail price and queues it for the POS's next
+     * product sync. Per-unit prices and cost are not touched.
+     */
+    @PUT("api/pda/products/{id}/price")
+    suspend fun updateProductPrice(
+        @Path("id") productId: Long,
+        @Body body: ProductPriceRequest,
+        @Tag attempt: WriteAttempt,
+    ): DocumentEnvelope<ProductPriceDto>
 
     // ── Purchase orders ─────────────────────────────────────────────────────
     @POST("api/pda/purchase-orders")

@@ -9,6 +9,9 @@ object ProductArgs {
     const val NAME = "productName"
     const val COST = "productCost"
 
+    /** Base retail price, so the price editor opens on the current figure. */
+    const val RETAIL = "productRetail"
+
     /**
      * The unit `resolve-barcode` matched, so the destination form opens on the
      * unit that was actually scanned (a BOX label pre-selects Box, not Pcs).
@@ -33,8 +36,9 @@ fun SavedStateHandle.scannedProduct(): ScannedProductArgs? {
     val id = get<String>(ProductArgs.ID)?.toLongOrNull() ?: return null
     val name = get<String>(ProductArgs.NAME)?.takeIf { it.isNotBlank() } ?: "Product #$id"
     val cost = get<String>(ProductArgs.COST)?.toDoubleOrNull()
+    val retail = get<String>(ProductArgs.RETAIL)?.toDoubleOrNull()
     return ScannedProductArgs(
-        option = ReferenceOption(id = id, title = name, cost = cost),
+        option = ReferenceOption(id = id, title = name, cost = cost, retail = retail),
         productUnitId = get<String>(ProductArgs.UNIT_ID)?.toLongOrNull(),
     )
 }

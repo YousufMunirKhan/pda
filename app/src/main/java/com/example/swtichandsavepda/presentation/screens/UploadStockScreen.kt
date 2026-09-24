@@ -29,6 +29,7 @@ import com.example.swtichandsavepda.presentation.components.BrandScaffold
 import com.example.swtichandsavepda.presentation.components.FormField
 import com.example.swtichandsavepda.presentation.components.ReferenceOption
 import com.example.swtichandsavepda.presentation.components.ReferencePickerField
+import com.example.swtichandsavepda.presentation.components.UpdatePriceButton
 import com.example.swtichandsavepda.presentation.components.SubmitOutcomeBanner
 import com.example.swtichandsavepda.presentation.components.UnitSection
 import com.example.swtichandsavepda.ui.theme.brandColors
@@ -46,6 +47,7 @@ fun UploadStockScreen(
     onSubmit: () -> Unit,
     onScanProduct: () -> Unit,
     onDismissMessages: () -> Unit,
+    onUpdatePrice: (ReferenceOption) -> Unit,
     onBackClick: () -> Unit,
 ) {
     // A stock write that has left the device cannot be un-sent, and leaving the
@@ -94,6 +96,9 @@ fun UploadStockScreen(
                         placeholder = "Search name, code or barcode",
                         onScanRequested = onScanProduct,
                     )
+                    uiState.product?.let { product ->
+                        UpdatePriceButton(onClick = { onUpdatePrice(product) }, enabled = !uiState.isSubmitting)
+                    }
 
                     UnitSection(
                         choice = uiState.unitChoice,

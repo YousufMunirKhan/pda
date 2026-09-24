@@ -11,6 +11,8 @@ import com.example.swtichandsavepda.data.model.PurchaseOrderReceipt
 data class ReceiptHistory(
     val orderId: Long,
     val orderReference: String,
+    /** Printed on the GRN slip; the receipts themselves do not carry it. */
+    val supplierName: String? = null,
     val receipts: List<PurchaseOrderReceipt> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,

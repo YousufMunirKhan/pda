@@ -15,7 +15,14 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.swtichandsavepda.data.model.AuthState
+import com.example.swtichandsavepda.data.model.ProductPriceChange
+import com.example.swtichandsavepda.presentation.PriceUpdateViewModel
+import com.example.swtichandsavepda.presentation.PrintViewModel
 import com.example.swtichandsavepda.presentation.ProductArgs
+import com.example.swtichandsavepda.presentation.components.PriceUpdateDialog
+import com.example.swtichandsavepda.presentation.screens.barcode.ScanOutcome
+import com.example.swtichandsavepda.presentation.screens.printer.PrinterSettingsScreen
+import com.example.swtichandsavepda.presentation.screens.printer.PrinterSettingsViewModel
 import com.example.swtichandsavepda.presentation.SessionViewModel
 import com.example.swtichandsavepda.presentation.screens.adjuststock.AdjustStockScreen
 import com.example.swtichandsavepda.presentation.screens.adjuststock.AdjustStockViewModel
@@ -39,6 +46,7 @@ sealed class Screen(val route: String) {
     data object Login : Screen("login")
     data object Menu : Screen("menu")
     data object Barcode : Screen("barcode")
+    data object PrinterSettings : Screen("printer-settings")
 
     /**
      * The document screens optionally take a scanned product (id + name + cost,
@@ -70,12 +78,16 @@ private fun withProductArgs(base: String) =
     "$base?${ProductArgs.ID}={${ProductArgs.ID}}" +
         "&${ProductArgs.NAME}={${ProductArgs.NAME}}" +
         "&${ProductArgs.COST}={${ProductArgs.COST}}" +
+        "&${ProductArgs.RETAIL}={${ProductArgs.RETAIL}}" +
         "&${ProductArgs.UNIT_ID}={${ProductArgs.UNIT_ID}}"
 
 private fun buildProductRoute(base: String, target: ScannedTarget) =
     "$base?${ProductArgs.ID}=${target.product.id}" +
         "&${ProductArgs.NAME}=${Uri.encode(target.product.name)}" +
         "&${ProductArgs.COST}=${target.product.cost?.toString().orEmpty()}" +
+        // Only a base-unit match carries the base retail price; a Box match's
+        // retail is the Box price, which the price editor does not change.
+        "&${ProductArgs.RETAIL}=${target.baseRetail?.toString().orEmpty()}" +
         "&${ProductArgs.UNIT_ID}=${target.unit?.productUnitId?.toString().orEmpty()}"
 
 private fun optionalStringArg(name: String): NamedNavArgument = navArgument(name) {
@@ -88,6 +100,7 @@ private fun productArgs(): List<NamedNavArgument> = listOf(
     optionalStringArg(ProductArgs.ID),
     optionalStringArg(ProductArgs.NAME),
     optionalStringArg(ProductArgs.COST),
+    optionalStringArg(ProductArgs.RETAIL),
     optionalStringArg(ProductArgs.UNIT_ID),
 )
 
@@ -155,6 +168,7 @@ fun AppNavigation() {
                 onAddLinesToPo = { navController.navigate(Screen.PurchaseOrder.route) },
                 onPurchaseReturn = { navController.navigate(Screen.PurchaseReturn.route) },
                 onScan = { navController.navigate(Screen.Barcode.route) },
+                onOpenPrinter = { navController.navigate(Screen.PrinterSettings.route) },
                 onLogout = {
                     viewModel.logout {
                         navController.navigate(Screen.Login.route) {
@@ -168,6 +182,8 @@ fun AppNavigation() {
         composable(Screen.AdjustStock.routeWithArgs, arguments = productArgs()) {
             val viewModel: AdjustStockViewModel = hiltViewModel()
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val priceViewModel: PriceUpdateViewModel = hiltViewModel()
+            PriceUpdateHost(priceViewModel)
 
             AdjustStockScreen(
                 uiState = uiState,
@@ -188,6 +204,7 @@ fun AppNavigation() {
                 onCancelRecent = viewModel::cancel,
                 onRefresh = viewModel::loadRecent,
                 onDismissMessages = viewModel::dismissMessages,
+                onUpdatePrice = { product -> priceViewModel.open(product.id, product.title, product.retail) },
                 onBackClick = { navController.popBackStack() },
             )
         }
@@ -195,6 +212,8 @@ fun AppNavigation() {
         composable(Screen.UploadStock.routeWithArgs, arguments = productArgs()) {
             val viewModel: UploadStockViewModel = hiltViewModel()
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val priceViewModel: PriceUpdateViewModel = hiltViewModel()
+            PriceUpdateHost(priceViewModel)
 
             UploadStockScreen(
                 uiState = uiState,
@@ -208,6 +227,7 @@ fun AppNavigation() {
                 onSubmit = viewModel::submit,
                 onScanProduct = { navController.navigate(Screen.Barcode.route) },
                 onDismissMessages = viewModel::dismissMessages,
+                onUpdatePrice = { product -> priceViewModel.open(product.id, product.title, product.retail) },
                 onBackClick = { navController.popBackStack() },
             )
         }
@@ -215,6 +235,10 @@ fun AppNavigation() {
         composable(Screen.PurchaseOrder.routeWithArgs, arguments = productArgs()) {
             val viewModel: PurchaseOrderViewModel = hiltViewModel()
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val printViewModel: PrintViewModel = hiltViewModel()
+            val printState by printViewModel.uiState.collectAsStateWithLifecycle()
+            val priceViewModel: PriceUpdateViewModel = hiltViewModel()
+            PriceUpdateHost(priceViewModel)
 
             PurchaseOrderScreen(
                 uiState = uiState,
@@ -243,6 +267,12 @@ fun AppNavigation() {
                 onCancelOrder = viewModel::cancelOrder,
                 onRefresh = viewModel::loadOrders,
                 onDismissMessages = viewModel::dismissMessages,
+                printState = printState,
+                onPrintReceipt = { history, receipt ->
+                    printViewModel.printGoodsReceived(receipt, history.orderReference, history.supplierName)
+                },
+                onDismissPrintMessage = printViewModel::dismissMessage,
+                onUpdatePrice = { product -> priceViewModel.open(product.id, product.title, product.retail) },
                 onBackClick = { navController.popBackStack() },
             )
         }
@@ -250,6 +280,10 @@ fun AppNavigation() {
         composable(Screen.PurchaseReturn.routeWithArgs, arguments = productArgs()) {
             val viewModel: PurchaseReturnViewModel = hiltViewModel()
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val printViewModel: PrintViewModel = hiltViewModel()
+            val printState by printViewModel.uiState.collectAsStateWithLifecycle()
+            val priceViewModel: PriceUpdateViewModel = hiltViewModel()
+            PriceUpdateHost(priceViewModel)
 
             PurchaseReturnScreen(
                 uiState = uiState,
@@ -275,6 +309,10 @@ fun AppNavigation() {
                 onCancelReturn = viewModel::cancelReturn,
                 onRefresh = viewModel::loadReturns,
                 onDismissMessages = viewModel::dismissMessages,
+                printState = printState,
+                onPrintReturn = printViewModel::printSupplierReturn,
+                onDismissPrintMessage = printViewModel::dismissMessage,
+                onUpdatePrice = { product -> priceViewModel.open(product.id, product.title, product.retail) },
                 onBackClick = { navController.popBackStack() },
             )
         }
@@ -282,6 +320,32 @@ fun AppNavigation() {
         composable(Screen.Barcode.route) {
             val viewModel: BarcodeViewModel = hiltViewModel()
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val printViewModel: PrintViewModel = hiltViewModel()
+            val printState by printViewModel.uiState.collectAsStateWithLifecycle()
+            val printerSettings by printViewModel.settings.collectAsStateWithLifecycle()
+            val priceViewModel: PriceUpdateViewModel = hiltViewModel()
+
+            // Every resolved scan is offered to auto-print; the ViewModel decides
+            // (setting on/off) and keys on the scan count, so a recomposition or
+            // rotation never prints the same scan twice.
+            val found = uiState.outcome as? ScanOutcome.Found
+            LaunchedEffect(uiState.scanCount, found) {
+                found?.let { printViewModel.onProductScanned(uiState.scanCount, it.target.product, it.target.unit) }
+            }
+
+            // After a price change the result sheet shows the new price, and a
+            // fresh label is one tap away for the operator re-pricing a shelf.
+            PriceUpdateHost(
+                viewModel = priceViewModel,
+                onSaved = { change -> viewModel.onBasePriceUpdated(change.productId, change.retail) },
+                savedActionLabel = "Print new label",
+                onSavedAction = {
+                    (viewModel.uiState.value.outcome as? ScanOutcome.Found)?.target?.let { target ->
+                        printViewModel.printLabel(target.product, target.unit, printerSettings.labelCopies)
+                    }
+                    priceViewModel.dismiss()
+                },
+            )
 
             // Each action clears the result sheet, then routes to the feature
             // with the scanned product pre-selected. The scanner stays on the
@@ -301,10 +365,61 @@ fun AppNavigation() {
                 onUploadStock = { target -> go(Screen.UploadStock.forScan(target)) },
                 onAddToPo = { target -> go(Screen.PurchaseOrder.forScan(target)) },
                 onReturn = { target -> go(Screen.PurchaseReturn.forScan(target)) },
+                printState = printState,
+                defaultLabelCopies = printerSettings.labelCopies,
+                onPrintLabel = { target, copies -> printViewModel.printLabel(target.product, target.unit, copies) },
+                onDismissPrintMessage = printViewModel::dismissMessage,
+                onUpdatePrice = { target ->
+                    priceViewModel.open(target.product.id, target.product.name, target.baseRetail)
+                },
+                onBackClick = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.PrinterSettings.route) {
+            val viewModel: PrinterSettingsViewModel = hiltViewModel()
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+            PrinterSettingsScreen(
+                uiState = uiState,
+                onRefresh = viewModel::refresh,
+                onSelectConnection = viewModel::selectConnection,
+                onSelectPrinter = viewModel::selectBluetoothPrinter,
+                onLabelLengthChange = viewModel::setLabelLength,
+                onGapSensorChange = viewModel::setGapSensor,
+                onAutoPrintChange = viewModel::setAutoPrint,
+                onCopiesChange = viewModel::setLabelCopies,
+                onPrintTestPage = viewModel::printTestPage,
+                onPrintSampleLabel = viewModel::printSampleLabel,
+                onDismissMessage = viewModel::dismissMessage,
                 onBackClick = { navController.popBackStack() },
             )
         }
     }
+}
+
+/**
+ * The price editor for whichever screen hosts it. [onSaved] fires once per
+ * accepted price so the host can refresh what it shows.
+ */
+@Composable
+private fun PriceUpdateHost(
+    viewModel: PriceUpdateViewModel,
+    onSaved: (ProductPriceChange) -> Unit = {},
+    savedActionLabel: String? = null,
+    onSavedAction: () -> Unit = {},
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val editor = state.editor ?: return
+    val saved = editor.saved
+    LaunchedEffect(saved) { saved?.let(onSaved) }
+    PriceUpdateDialog(
+        editor = editor,
+        onInputChange = viewModel::setInput,
+        onSave = viewModel::save,
+        onDismiss = viewModel::dismiss,
+        savedAction = savedActionLabel?.let { it to onSavedAction },
+    )
 }
 
 /**

@@ -30,6 +30,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.swtichandsavepda.data.model.PurchaseOrderReceipt
 import com.example.swtichandsavepda.data.model.UomMath
+import com.example.swtichandsavepda.presentation.PrintJobKeys
+import com.example.swtichandsavepda.presentation.PrintUiState
 import com.example.swtichandsavepda.presentation.ReceiptHistory
 import com.example.swtichandsavepda.ui.theme.StatusDanger
 import com.example.swtichandsavepda.ui.theme.brandColors
@@ -53,6 +55,9 @@ fun ReceiptHistorySheet(
     history: ReceiptHistory,
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
+    printState: PrintUiState,
+    onPrintReceipt: (PurchaseOrderReceipt) -> Unit,
+    onDismissPrintMessage: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -77,6 +82,11 @@ fun ReceiptHistorySheet(
             )
 
             Spacer(modifier = Modifier.height(14.dp))
+
+            if (printState.isPrinting || printState.message != null) {
+                PrintFeedback(state = printState, onDismiss = onDismissPrintMessage)
+                Spacer(modifier = Modifier.height(10.dp))
+            }
 
             when {
                 history.isLoading -> Row(
@@ -112,7 +122,12 @@ fun ReceiptHistorySheet(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     items(history.receipts, key = { it.id }) { receipt ->
-                        ReceiptRow(receipt)
+                        ReceiptRow(
+                            receipt = receipt,
+                            isPrinting = printState.isPrinting(PrintJobKeys.goodsReceived(receipt)),
+                            canPrint = !printState.isPrinting,
+                            onPrint = { onPrintReceipt(receipt) },
+                        )
                     }
                 }
             }
@@ -137,7 +152,12 @@ fun ReceiptHistorySheet(
 }
 
 @Composable
-private fun ReceiptRow(receipt: PurchaseOrderReceipt) {
+private fun ReceiptRow(
+    receipt: PurchaseOrderReceipt,
+    isPrinting: Boolean,
+    canPrint: Boolean,
+    onPrint: () -> Unit,
+) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
@@ -206,6 +226,10 @@ private fun ReceiptRow(receipt: PurchaseOrderReceipt) {
                     color = MaterialTheme.brandColors.textHeading,
                 )
             }
+        }
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            PrintButton(isPrinting = isPrinting, enabled = canPrint, onClick = onPrint, label = "Print GRN")
         }
     }
 }

@@ -1,0 +1,264 @@
+package com.example.swtichandsavepda.printer.escpos
+
+import com.example.swtichandsavepda.data.model.PortalState
+import com.example.swtichandsavepda.data.model.UomMath
+import com.example.swtichandsavepda.printer.PrinterException
+import com.example.swtichandsavepda.printer.escpos.EscPosBuilder.Alignment
+import com.example.swtichandsavepda.printer.escpos.EscPosBuilder.TextSize
+import com.example.swtichandsavepda.printer.model.PrintDocument
+import com.example.swtichandsavepda.printer.model.PrinterSettings
+import com.example.swtichandsavepda.printer.model.SlipLine
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+/**
+ * Lays out a [PrintDocument] as ESC/POS bytes for a 58 mm, 203 dpi printer:
+ * 384 printable dots, 32 characters of font A per line, 8 dots per millimetre.
+ */
+internal class PrintRenderer(zone: ZoneId = ZoneId.systemDefault()) {
+
+    private val timestamp: DateTimeFormatter =
+        DateTimeFormatter.ofPattern("d MMM yyyy HH:mm", Locale.UK).withZone(zone)
+
+    fun render(document: PrintDocument, settings: PrinterSettings, copies: Int = 1): ByteArray {
+        val builder = EscPosBuilder().initialize()
+        repeat(copies.coerceIn(1, PrinterSettings.MAX_COPIES)) {
+            when (document) {
+                is PrintDocument.ProductLabel -> renderLabel(builder, document, settings)
+                is PrintDocument.GoodsReceivedSlip -> renderGoodsReceived(builder, document)
+                is PrintDocument.SupplierReturnSlip -> renderSupplierReturn(builder, document)
+                is PrintDocument.TestPage -> renderTestPage(builder, document)
+            }
+        }
+        return builder.build()
+    }
+
+    // ── Label ───────────────────────────────────────────────────────────────
+
+    /**
+     * One sticker, padded to exactly [PrinterSettings.labelLengthMm] so a run of
+     * labels stays registered to the roll. When the text would crowd out the
+     * barcode, detail is shed in order of least use: the unit line, then the
+     * second name line, then the price — the barcode is the point of the label.
+     */
+    private fun renderLabel(
+        builder: EscPosBuilder,
+        label: PrintDocument.ProductLabel,
+        settings: PrinterSettings,
+    ) {
+        val spec = BarcodeSpec.of(label.barcode)
+            ?: throw PrinterException.NothingToPrint("This product has no barcode to print.")
+        val moduleWidth = spec.moduleWidthFor(PRINTABLE_DOTS)
+            ?: throw PrinterException.NothingToPrint("This barcode is too long to fit on a 58 mm label.")
+
+        val pitchDots = settings.labelLengthMm * DOTS_PER_MM
+        val plan = planLabel(label, pitchDots)
+        val startDots = builder.consumedDots
+
+        builder.feedDots(LABEL_MARGIN_DOTS)
+            .align(Alignment.CENTER)
+            .bold(true)
+            .setLineSpacing(EscPosBuilder.DEFAULT_LINE_SPACING_DOTS)
+        plan.nameLines.forEach { builder.line(it) }
+        builder.bold(false)
+        plan.unitLine?.let { builder.line(it) }
+
+        plan.priceLine?.let { price ->
+            builder.size(TextSize.DOUBLE).bold(true).setLineSpacing(DOUBLE_LINE_DOTS)
+                .line(price)
+                .size(TextSize.NORMAL).bold(false).setLineSpacing(EscPosBuilder.DEFAULT_LINE_SPACING_DOTS)
+        }
+
+        builder.barcode(spec, plan.barHeightDots, moduleWidth).align(Alignment.LEFT)
+
+        if (settings.useGapSensor) {
+            builder.feedToNextLabel()
+        } else {
+            val used = builder.consumedDots - startDots
+            builder.feedDots(pitchDots - used)
+        }
+    }
+
+    private data class LabelPlan(
+        val nameLines: List<String>,
+        val unitLine: String?,
+        val priceLine: String?,
+        val barHeightDots: Int,
+    )
+
+    private fun planLabel(label: PrintDocument.ProductLabel, pitchDots: Int): LabelPlan {
+        val name = TextLayout.wrap(label.productName, LINE_CHARS, maxLines = 2)
+        val unit = label.unitLabel?.takeIf { it.isNotBlank() }?.let { TextLayout.wrap(it, LINE_CHARS, 1).first() }
+        val price = label.price?.let(::money)
+
+        val candidates = listOf(
+            LabelPlan(name, unit, price, 0),
+            LabelPlan(name, null, price, 0),
+            LabelPlan(name.take(1), null, price, 0),
+            LabelPlan(name.take(1), null, null, 0),
+        )
+        return candidates.firstNotNullOfOrNull { plan ->
+            barHeightFor(plan, pitchDots).takeIf { it >= MIN_BAR_DOTS }?.let { plan.copy(barHeightDots = it) }
+        } ?: candidates.last().copy(barHeightDots = MIN_BAR_DOTS)
+    }
+
+    private fun barHeightFor(plan: LabelPlan, pitchDots: Int): Int {
+        val textLines = plan.nameLines.size + (if (plan.unitLine != null) 1 else 0)
+        val fixed = LABEL_MARGIN_DOTS * 2 +
+            textLines * EscPosBuilder.DEFAULT_LINE_SPACING_DOTS +
+            (if (plan.priceLine != null) DOUBLE_LINE_DOTS else 0) +
+            EscPosBuilder.BARCODE_CAPTION_DOTS
+        return (pitchDots - fixed).coerceAtMost(MAX_BAR_DOTS)
+    }
+
+    // ── Slips ───────────────────────────────────────────────────────────────
+
+    private fun renderGoodsReceived(builder: EscPosBuilder, slip: PrintDocument.GoodsReceivedSlip) {
+        header(builder, slip.storeName, "GOODS RECEIVED NOTE")
+        keyValue(builder, "GRN", slip.receiptReference)
+        keyValue(builder, "PO", slip.orderReference)
+        slip.supplierName?.let { keyValue(builder, "Supplier", it) }
+        slip.receivedAtEpochMs?.let { keyValue(builder, "Received", formatTime(it)) }
+        slip.receivedBy?.let { keyValue(builder, "By", it) }
+        keyValue(builder, "Status", statusLabel(slip.status))
+        builder.line(TextLayout.divider(LINE_CHARS))
+
+        builder.bold(true).line(TextLayout.spread("Item", "Qty", LINE_CHARS)).bold(false)
+        slip.lines.forEach { line -> quantityRow(builder, line) }
+        builder.line(TextLayout.divider(LINE_CHARS))
+        builder.bold(true)
+            .line(TextLayout.spread("${slip.lines.size} line(s)", "Total ${pretty(slip.lines.sumOf { it.quantity })}", LINE_CHARS))
+            .bold(false)
+
+        slip.note?.takeIf { it.isNotBlank() }?.let { note ->
+            builder.line()
+            TextLayout.wrap("Note: $note", LINE_CHARS).forEach { builder.line(it) }
+        }
+        footer(builder, slip.receiptReference, slip.printedAtEpochMs, signatureLabel = "Checked by")
+    }
+
+    private fun renderSupplierReturn(builder: EscPosBuilder, slip: PrintDocument.SupplierReturnSlip) {
+        header(builder, slip.storeName, "SUPPLIER RETURN")
+        keyValue(builder, "Ref", slip.referenceNo)
+        slip.supplierName?.let { keyValue(builder, "Supplier", it) }
+        slip.orderReference?.let { keyValue(builder, "PO", it) }
+        slip.reason?.takeIf { it.isNotBlank() }?.let { keyValue(builder, "Reason", it) }
+        keyValue(builder, "Status", statusLabel(slip.status))
+        builder.line(TextLayout.divider(LINE_CHARS))
+
+        slip.lines.forEach { line ->
+            TextLayout.wrap(line.name, LINE_CHARS).forEach { builder.line(it) }
+            val quantity = "  ${quantityLabel(line)}" + (line.unitPrice?.let { " x ${money(it)}" } ?: "")
+            builder.line(TextLayout.spread(quantity, line.lineTotal?.let(::money).orEmpty(), LINE_CHARS))
+        }
+        builder.line(TextLayout.divider(LINE_CHARS))
+        builder.bold(true).line(TextLayout.spread("TOTAL", money(slip.total), LINE_CHARS)).bold(false)
+
+        footer(builder, slip.referenceNo, slip.printedAtEpochMs, signatureLabel = "Driver")
+    }
+
+    private fun renderTestPage(builder: EscPosBuilder, page: PrintDocument.TestPage) {
+        header(builder, storeName = null, title = "PRINTER TEST")
+        keyValue(builder, "Via", page.connectionLabel)
+        keyValue(builder, "Printed", formatTime(page.printedAtEpochMs))
+        keyValue(builder, "Pound sign", money(1.99))
+        builder.line()
+
+        builder.align(Alignment.CENTER)
+        listOf(SAMPLE_EAN_13, SAMPLE_CODE_128).forEach { code ->
+            val spec = BarcodeSpec.of(code) ?: return@forEach
+            spec.moduleWidthFor(PRINTABLE_DOTS, maxModuleDots = SLIP_MODULE_DOTS)?.let { width ->
+                builder.barcode(spec, SLIP_BAR_DOTS, width).line()
+            }
+        }
+        builder.align(Alignment.LEFT)
+        TextLayout.wrap("If both barcodes scan, the printer is ready.", LINE_CHARS).forEach { builder.line(it) }
+        builder.feedDots(TEAR_OFF_FEED_DOTS)
+    }
+
+    private fun header(builder: EscPosBuilder, storeName: String?, title: String) {
+        builder.align(Alignment.CENTER)
+        storeName?.takeIf { it.isNotBlank() }?.let { name ->
+            builder.size(TextSize.DOUBLE).bold(true).setLineSpacing(DOUBLE_LINE_DOTS)
+            TextLayout.wrap(name, DOUBLE_LINE_CHARS, maxLines = 2).forEach { builder.line(it) }
+            builder.size(TextSize.NORMAL).setLineSpacing(EscPosBuilder.DEFAULT_LINE_SPACING_DOTS)
+        }
+        builder.bold(true).line(title).bold(false)
+            .align(Alignment.LEFT)
+            .line(TextLayout.divider(LINE_CHARS))
+    }
+
+    /** Barcode of the document reference, so the paper scans back to the record. */
+    private fun footer(builder: EscPosBuilder, reference: String, printedAtEpochMs: Long, signatureLabel: String) {
+        builder.line()
+        BarcodeSpec.of(reference)?.let { spec ->
+            spec.moduleWidthFor(PRINTABLE_DOTS, maxModuleDots = SLIP_MODULE_DOTS)?.let { width ->
+                builder.align(Alignment.CENTER).barcode(spec, SLIP_BAR_DOTS, width).align(Alignment.LEFT)
+            }
+        }
+        builder.line()
+            .line("$signatureLabel: ____________________".take(LINE_CHARS))
+            .line()
+            .align(Alignment.CENTER)
+            .line("Printed ${formatTime(printedAtEpochMs)}")
+            .align(Alignment.LEFT)
+            .feedDots(TEAR_OFF_FEED_DOTS)
+    }
+
+    /** "Supplier  Acme Wholesale" with the value wrapped under itself. */
+    private fun keyValue(builder: EscPosBuilder, key: String, value: String) {
+        val valueWidth = LINE_CHARS - KEY_COLUMN_CHARS
+        TextLayout.wrap(value, valueWidth).ifEmpty { listOf("") }.forEachIndexed { index, part ->
+            val prefix = if (index == 0) key.padEnd(KEY_COLUMN_CHARS) else " ".repeat(KEY_COLUMN_CHARS)
+            builder.line(prefix + part)
+        }
+    }
+
+    /** Name on the left, quantity pinned right; long names continue underneath. */
+    private fun quantityRow(builder: EscPosBuilder, line: SlipLine) {
+        val quantity = quantityLabel(line)
+        val nameWidth = LINE_CHARS - quantity.length - 1
+        val nameLines = TextLayout.wrap(line.name, nameWidth.coerceAtLeast(MIN_NAME_CHARS))
+        builder.line(TextLayout.spread(nameLines.firstOrNull().orEmpty(), quantity, LINE_CHARS))
+        nameLines.drop(1).forEach { builder.line(it) }
+    }
+
+    private fun quantityLabel(line: SlipLine): String =
+        pretty(line.quantity) + (line.unitCode?.takeIf { it.isNotBlank() }?.let { " $it" } ?: "")
+
+    private fun pretty(quantity: Double): String = UomMath.pretty(quantity)
+
+    private fun money(amount: Double): String = String.format(Locale.UK, "£%.2f", amount)
+
+    private fun formatTime(epochMs: Long): String = timestamp.format(Instant.ofEpochMilli(epochMs))
+
+    private fun statusLabel(state: PortalState): String = when (state) {
+        PortalState.PENDING -> "Pending"
+        PortalState.CONFIRMED -> "Confirmed"
+        PortalState.REJECTED -> "Rejected"
+        PortalState.UNKNOWN -> "Draft"
+    }
+
+    companion object {
+        const val PRINTABLE_DOTS = 384
+        const val DOTS_PER_MM = 8
+        const val LINE_CHARS = 32
+        private const val DOUBLE_LINE_CHARS = 16
+        private const val DOUBLE_LINE_DOTS = 54
+        private const val KEY_COLUMN_CHARS = 10
+        private const val MIN_NAME_CHARS = 8
+
+        private const val LABEL_MARGIN_DOTS = 12
+        private const val MIN_BAR_DOTS = 32
+        private const val MAX_BAR_DOTS = 80
+
+        private const val SLIP_BAR_DOTS = 60
+        private const val SLIP_MODULE_DOTS = 2
+        private const val TEAR_OFF_FEED_DOTS = 120
+
+        const val SAMPLE_EAN_13 = "5012345678900"
+        private const val SAMPLE_CODE_128 = "SWITCH-SAVE"
+    }
+}

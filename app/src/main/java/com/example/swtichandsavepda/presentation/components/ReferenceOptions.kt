@@ -16,6 +16,7 @@ fun ProductRef.toOption(): ReferenceOption = ReferenceOption(
         unitType,
     ).joinToString(" · ").ifBlank { null },
     cost = cost,
+    retail = retail,
 )
 
 fun SupplierRef.toOption(): ReferenceOption = ReferenceOption(

@@ -14,9 +14,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -51,6 +55,7 @@ fun ReceiveSheet(
     onFillRemaining: () -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    onUpdatePrice: (ReferenceOption) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -124,7 +129,27 @@ fun ReceiveSheet(
                                 },
                             )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
+                        // Deliveries are when supplier prices move, so the retail
+                        // price can be corrected right here, line by line.
+                        line.line.productId?.let { productId ->
+                            IconButton(
+                                onClick = {
+                                    onUpdatePrice(
+                                        ReferenceOption(
+                                            id = productId,
+                                            title = line.line.productName ?: "Product #$productId",
+                                        ),
+                                    )
+                                },
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Sell,
+                                    contentDescription = "Update price",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
                         FormField(
                             value = line.entered,
                             onValueChange = { onQuantityChange(index, it) },

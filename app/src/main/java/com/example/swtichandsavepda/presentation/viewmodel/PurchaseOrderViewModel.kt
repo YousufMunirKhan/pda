@@ -342,6 +342,7 @@ class PurchaseOrderViewModel @Inject constructor(
                 receiptHistory = ReceiptHistory(
                     orderId = orderId,
                     orderReference = order.reference,
+                    supplierName = order.supplierName,
                     isLoading = true,
                 ),
             )

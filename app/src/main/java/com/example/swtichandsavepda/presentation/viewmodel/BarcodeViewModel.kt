@@ -22,7 +22,13 @@ import javax.inject.Inject
 data class ScannedTarget(
     val product: ProductRef,
     val unit: ProductUnit? = null,
-)
+) {
+    /**
+     * The product's base retail price, when this scan knows it. A Box match
+     * carries the Box price instead, which is not what the price editor sets.
+     */
+    val baseRetail: Double? get() = product.retail.takeIf { unit == null || unit.isBase }
+}
 
 /** What a scan resolved to, driving the action sheet on the scanner. */
 sealed interface ScanOutcome {
@@ -137,6 +143,23 @@ class BarcodeViewModel @Inject constructor(
     /** The operator picked one of several units the scanned barcode matched. */
     fun selectMatch(match: BarcodeMatch) {
         _uiState.update { it.copy(outcome = ScanOutcome.Found(match.toTarget())) }
+    }
+
+    /**
+     * A new base price was saved from the result sheet. A base-unit label then
+     * prints the new price; a Box label keeps its own unit price.
+     */
+    fun onBasePriceUpdated(productId: Long, retail: Double) {
+        _uiState.update { state ->
+            val found = state.outcome as? ScanOutcome.Found ?: return@update state
+            val target = found.target
+            if (target.product.id != productId || (target.unit != null && !target.unit.isBase)) {
+                return@update state
+            }
+            state.copy(
+                outcome = ScanOutcome.Found(target.copy(product = target.product.copy(retail = retail))),
+            )
+        }
     }
 
     /** Clears the result sheet so scanning can resume. */

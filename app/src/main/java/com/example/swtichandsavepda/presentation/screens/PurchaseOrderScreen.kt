@@ -52,6 +52,7 @@ import com.example.swtichandsavepda.presentation.components.BrandScaffold
 import com.example.swtichandsavepda.presentation.components.FormField
 import com.example.swtichandsavepda.presentation.components.ReferenceOption
 import com.example.swtichandsavepda.presentation.components.ReceiptHistorySheet
+import com.example.swtichandsavepda.presentation.components.UpdatePriceButton
 import com.example.swtichandsavepda.presentation.components.ReceiveSheet
 import com.example.swtichandsavepda.presentation.components.ReferencePickerField
 import com.example.swtichandsavepda.presentation.components.SectionTitle
@@ -69,6 +70,9 @@ import com.example.swtichandsavepda.ui.theme.TagSuccessFg
 import com.example.swtichandsavepda.ui.theme.TagWarningBg
 import com.example.swtichandsavepda.ui.theme.TagWarningFg
 import com.example.swtichandsavepda.ui.theme.brandColors
+import com.example.swtichandsavepda.data.model.PurchaseOrderReceipt
+import com.example.swtichandsavepda.presentation.PrintUiState
+import com.example.swtichandsavepda.presentation.ReceiptHistory
 import java.time.Instant
 import java.time.ZoneOffset
 
@@ -100,6 +104,10 @@ fun PurchaseOrderScreen(
     onCancelOrder: (Long) -> Unit,
     onRefresh: () -> Unit,
     onDismissMessages: () -> Unit,
+    printState: PrintUiState,
+    onPrintReceipt: (ReceiptHistory, PurchaseOrderReceipt) -> Unit,
+    onDismissPrintMessage: () -> Unit,
+    onUpdatePrice: (ReferenceOption) -> Unit,
     onBackClick: () -> Unit,
 ) {
     // A stock write that has left the device cannot be un-sent, and leaving the
@@ -148,6 +156,7 @@ fun PurchaseOrderScreen(
                 onRemoveLine = onRemoveLine,
                 onSubmit = onSubmit,
                 onScanProduct = onScanProduct,
+                onUpdatePrice = onUpdatePrice,
             )
 
             SectionTitle(text = "Purchase orders for this shop")
@@ -187,6 +196,9 @@ fun PurchaseOrderScreen(
             history = history,
             onRetry = onRetryReceiptHistory,
             onDismiss = onDismissReceiptHistory,
+            printState = printState,
+            onPrintReceipt = { receipt -> onPrintReceipt(history, receipt) },
+            onDismissPrintMessage = onDismissPrintMessage,
         )
     }
 
@@ -198,6 +210,7 @@ fun PurchaseOrderScreen(
             onFillRemaining = onFillReceiveRemaining,
             onConfirm = onConfirmReceive,
             onDismiss = onCancelReceive,
+            onUpdatePrice = onUpdatePrice,
         )
     }
 }
@@ -218,6 +231,7 @@ private fun CreateOrderCard(
     onRemoveLine: (Int) -> Unit,
     onSubmit: () -> Unit,
     onScanProduct: () -> Unit,
+    onUpdatePrice: (ReferenceOption) -> Unit,
 ) {
     BrandCard(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -255,6 +269,9 @@ private fun CreateOrderCard(
                 placeholder = "Search name, code or barcode",
                 onScanRequested = onScanProduct,
             )
+            uiState.lineProduct?.let { product ->
+                UpdatePriceButton(onClick = { onUpdatePrice(product) }, enabled = !uiState.isSubmitting)
+            }
             UnitSection(
                 choice = uiState.lineUnitChoice,
                 onSelect = onSelectLineUnit,

@@ -20,12 +20,14 @@ import androidx.compose.material.icons.automirrored.filled.AssignmentReturn
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Warehouse
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -69,6 +71,7 @@ fun MenuScreen(
     onAddLinesToPo: () -> Unit,
     onPurchaseReturn: () -> Unit,
     onScan: () -> Unit,
+    onOpenPrinter: () -> Unit,
     onLogout: () -> Unit,
 ) {
     val configuration = LocalConfiguration.current
@@ -86,6 +89,15 @@ fun MenuScreen(
             title = "Main Menu",
             subtitle = "Main Warehouse",
             leading = { HeaderAvatar(initials = "MW") },
+            actions = {
+                IconButton(onClick = onOpenPrinter) {
+                    Icon(
+                        imageVector = Icons.Filled.Print,
+                        contentDescription = "Printer settings",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            },
         ) {
         // Fills the screen on every size: the hero + four cards stretch to
         // cover the height (welcome + log out stay their natural size), full
